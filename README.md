@@ -2,6 +2,12 @@
 
 JavaTavern is a local-first Android character chat app built with Java and XML Views. It focuses on calm mobile interaction, portable character data, explicit permissions, and understandable model configuration.
 
+## Download
+
+Download the latest Android APK from [GitHub Releases](https://github.com/Cassiur/JavaTavern/releases). Open the APK on an Android 7.0 or newer phone and allow installation from the browser or file manager when Android asks.
+
+Preview builds currently use a development signature. Back up local data before upgrading; a future stable channel will use a dedicated release signing key.
+
 > Pre-1.0 software: keep backups before relying on it for long-running stories.
 
 ## Screenshots
