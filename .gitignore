@@ -1,0 +1,16 @@
+*.iml
+.gradle
+/local.properties
+/.idea
+/build
+/captures
+.externalNativeBuild
+.cxx
+app/build
+*.jks
+*.keystore
+keystore.properties
+.env
+*.log
+/device-artifacts/
+/lint-results/
