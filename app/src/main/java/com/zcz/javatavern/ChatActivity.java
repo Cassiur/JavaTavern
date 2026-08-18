@@ -30,8 +30,7 @@ import androidx.recyclerview.widget.RecyclerView;
 import com.google.android.material.button.MaterialButton;
 import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 import com.zcz.javatavern.agent.LocalAgentRouter;
-import com.zcz.javatavern.data.CharacterRepository;
-import com.zcz.javatavern.data.ChatHistoryStore;
+import com.zcz.javatavern.data.ChatRepository;
 import com.zcz.javatavern.data.ConversationDraftStore;
 import com.zcz.javatavern.data.ModelSettings;
 import com.zcz.javatavern.data.SecureModelSettingsStore;
@@ -39,7 +38,6 @@ import com.zcz.javatavern.model.AgentCard;
 import com.zcz.javatavern.model.CharacterProfile;
 import com.zcz.javatavern.model.ChatMessage;
 import com.zcz.javatavern.media.ImageAttachmentStore;
-import com.zcz.javatavern.memory.LongTermMemoryStore;
 import com.zcz.javatavern.network.OpenAiCompatibleClient;
 import com.zcz.javatavern.service.MockReplyEngine;
 import com.zcz.javatavern.service.ReplyEngine;
@@ -63,11 +61,9 @@ public final class ChatActivity extends AppCompatActivity {
 
     private CharacterProfile character;
     private String characterId = "";
-    private CharacterRepository characterRepository;
-    private ChatHistoryStore historyStore;
+    private ChatRepository chatRepository;
     private ConversationDraftStore draftStore;
     private SecureModelSettingsStore settingsStore;
-    private LongTermMemoryStore memoryStore;
     private MessageAdapter messageAdapter;
     private RecyclerView messageList;
     private LinearLayoutManager messageLayoutManager;
@@ -101,11 +97,9 @@ public final class ChatActivity extends AppCompatActivity {
         setContentView(R.layout.activity_chat);
 
         String requestedCharacterId = getIntent().getStringExtra(MainActivity.EXTRA_CHARACTER_ID);
-        characterRepository = new CharacterRepository(getApplicationContext());
-        historyStore = new ChatHistoryStore(getApplicationContext());
+        chatRepository = new ChatRepository(getApplicationContext());
         draftStore = new ConversationDraftStore(getApplicationContext());
         settingsStore = new SecureModelSettingsStore(getApplicationContext());
-        memoryStore = new LongTermMemoryStore(getApplicationContext());
         imageAttachmentStore = new ImageAttachmentStore(getApplicationContext());
 
         TextView title = findViewById(R.id.chatTitle);
@@ -194,38 +188,19 @@ public final class ChatActivity extends AppCompatActivity {
 
     private void loadHistory(String requestedCharacterId, TextView title) {
         databaseExecutor.execute(() -> {
-            CharacterProfile loadedCharacter = characterRepository.findById(requestedCharacterId);
-            if (loadedCharacter == null) {
-                loadedCharacter = characterRepository.getDefaultCharacter();
-            }
-            List<ChatMessage> messages = historyStore.loadRecentMessages(
-                    loadedCharacter.getId(),
+            ChatRepository.SessionData session = chatRepository.loadSession(
+                    requestedCharacterId,
                     INITIAL_PAGE_SIZE
             );
-            boolean moreHistoryAvailable = messages.size() >= INITIAL_PAGE_SIZE;
-            if (messages.isEmpty()) {
-                long createdAt = System.currentTimeMillis();
-                long id = historyStore.addMessage(
-                        loadedCharacter.getId(),
-                        ChatMessage.Role.ASSISTANT,
-                        loadedCharacter.getGreeting(),
-                        createdAt
-                );
-                messages.add(new ChatMessage(
-                        id,
-                        ChatMessage.Role.ASSISTANT,
-                        loadedCharacter.getGreeting(),
-                        createdAt
-                ));
-            }
-            CharacterProfile resultCharacter = loadedCharacter;
+            CharacterProfile resultCharacter = session.getCharacter();
+            List<ChatMessage> messages = session.getMessages();
             mainHandler.post(() -> {
                 if (isFinishing() || isDestroyed()) {
                     return;
                 }
                 character = resultCharacter;
                 this.characterId = character.getId();
-                hasMoreHistory = moreHistoryAvailable;
+                hasMoreHistory = session.hasMoreHistory();
                 title.setText(character.getName());
                 messageAdapter.replaceAll(messages);
                 String draft = draftStore.load(characterId);
@@ -255,7 +230,7 @@ public final class ChatActivity extends AppCompatActivity {
         int anchorOffset = anchorView == null ? 0 : anchorView.getTop() - messageList.getPaddingTop();
         loadingOlderMessages = true;
         databaseExecutor.execute(() -> {
-            List<ChatMessage> olderMessages = historyStore.loadMessagesBefore(
+            List<ChatMessage> olderMessages = chatRepository.loadMessagesBefore(
                     characterId,
                     beforeId,
                     OLDER_PAGE_SIZE
@@ -308,7 +283,7 @@ public final class ChatActivity extends AppCompatActivity {
             return;
         }
         databaseExecutor.execute(() -> {
-            List<ChatMessage> results = historyStore.searchMessages(characterId, query, 30);
+            List<ChatMessage> results = chatRepository.searchMessages(characterId, query, 30);
             mainHandler.post(() -> {
                 if (isFinishing() || isDestroyed()) {
                     return;
@@ -344,7 +319,7 @@ public final class ChatActivity extends AppCompatActivity {
 
     private void openSearchResult(ChatMessage target) {
         databaseExecutor.execute(() -> {
-            List<ChatMessage> context = historyStore.loadMessageContext(
+            List<ChatMessage> context = chatRepository.loadMessageContext(
                     characterId,
                     target.getId(),
                     20
@@ -414,7 +389,7 @@ public final class ChatActivity extends AppCompatActivity {
         messageAdapter.add(userMessage);
         scrollToLatest();
         databaseExecutor.execute(() -> {
-            long id = historyStore.addMessage(
+            long id = chatRepository.addMessage(
                     character.getId(),
                     userMessage.getRole(),
                     userMessage.getKind(),
@@ -553,7 +528,7 @@ public final class ChatActivity extends AppCompatActivity {
         messageAdapter.add(message);
         scrollToLatest();
         databaseExecutor.execute(() -> {
-            long id = historyStore.addMessage(
+            long id = chatRepository.addMessage(
                     character.getId(),
                     message.getRole(),
                     message.getKind(),
@@ -571,7 +546,7 @@ public final class ChatActivity extends AppCompatActivity {
             ));
         });
         if (requiresConfirmation) {
-            databaseExecutor.execute(() -> historyStore.addAgentAudit(
+            databaseExecutor.execute(() -> chatRepository.addAgentAudit(
                     character.getId(),
                     message.getActionToken(),
                     message.getActionType(),
@@ -596,8 +571,8 @@ public final class ChatActivity extends AppCompatActivity {
             String title = "会话已清空";
             String content = "当前角色的聊天消息已删除，角色、模型设置和其他会话未受影响。";
             try {
-                List<String> attachmentPaths = historyStore.loadAttachmentPaths(character.getId());
-                long id = historyStore.clearConversationAndAddAgentResult(
+                List<String> attachmentPaths = chatRepository.loadAttachmentPaths(character.getId());
+                long id = chatRepository.clearConversationAndAddAgentResult(
                         character.getId(),
                         proposal.getActionToken(),
                         proposal.getActionType(),
@@ -638,11 +613,11 @@ public final class ChatActivity extends AppCompatActivity {
                 ChatMessage.ActionState.CANCELLED
         );
         databaseExecutor.execute(() -> {
-            historyStore.updateActionState(
+            chatRepository.updateActionState(
                     proposal.getActionToken(),
                     ChatMessage.ActionState.CANCELLED
             );
-            historyStore.addAgentAudit(
+            chatRepository.addAgentAudit(
                     character.getId(),
                     proposal.getActionToken(),
                     proposal.getActionType(),
@@ -659,11 +634,11 @@ public final class ChatActivity extends AppCompatActivity {
                 ChatMessage.ActionState.FAILED
         );
         databaseExecutor.execute(() -> {
-            historyStore.updateActionState(
+            chatRepository.updateActionState(
                     proposal.getActionToken(),
                     ChatMessage.ActionState.FAILED
             );
-            historyStore.addAgentAudit(
+            chatRepository.addAgentAudit(
                     character.getId(),
                     proposal.getActionToken(),
                     proposal.getActionType(),
@@ -700,7 +675,7 @@ public final class ChatActivity extends AppCompatActivity {
                 settings,
                 character,
                 contextWindow,
-                memoryStore.buildPrompt(characterId),
+                chatRepository.buildConfirmedMemoryPrompt(characterId),
                 new OpenAiCompatibleClient.StreamListener() {
                     @Override
                     public void onOpen() {
@@ -842,7 +817,7 @@ public final class ChatActivity extends AppCompatActivity {
 
     private void persistAssistantText(String content, long createdAt) {
         databaseExecutor.execute(() -> {
-            long id = historyStore.addMessage(
+            long id = chatRepository.addMessage(
                     character.getId(),
                     ChatMessage.Role.ASSISTANT,
                     content,
@@ -916,7 +891,7 @@ public final class ChatActivity extends AppCompatActivity {
                     String reaction = which == reactions.length - 1 ? "" : reactions[which];
                     databaseExecutor.execute(() -> {
                         try {
-                            historyStore.updateMessageReaction(message.getId(), reaction);
+                            chatRepository.updateMessageReaction(message.getId(), reaction);
                             mainHandler.post(() -> messageAdapter.updateReaction(
                                     message.getId(),
                                     reaction
@@ -934,7 +909,7 @@ public final class ChatActivity extends AppCompatActivity {
             return;
         }
         databaseExecutor.execute(() -> {
-            ChatMessage source = historyStore.loadPreviousUserMessage(
+            ChatMessage source = chatRepository.loadPreviousUserMessage(
                     characterId,
                     message.getId()
             );
@@ -947,7 +922,7 @@ public final class ChatActivity extends AppCompatActivity {
                 return;
             }
             try {
-                historyStore.deleteMessage(message.getId());
+                chatRepository.deleteMessage(message.getId());
             } catch (RuntimeException exception) {
                 mainHandler.post(this::showMessageActionFailure);
                 return;
@@ -995,7 +970,7 @@ public final class ChatActivity extends AppCompatActivity {
                     dialog.dismiss();
                     databaseExecutor.execute(() -> {
                         try {
-                            historyStore.updateMessageContent(message.getId(), updatedContent);
+                            chatRepository.updateMessageContent(message.getId(), updatedContent);
                             mainHandler.post(() -> {
                                 messageAdapter.updateMessageContent(message.getId(), updatedContent);
                                 Toast.makeText(this, R.string.message_updated, Toast.LENGTH_SHORT).show();
@@ -1016,7 +991,7 @@ public final class ChatActivity extends AppCompatActivity {
                 .setPositiveButton(R.string.delete_message, (dialog, which) ->
                         databaseExecutor.execute(() -> {
                             try {
-                                historyStore.deleteMessage(message.getId());
+                                chatRepository.deleteMessage(message.getId());
                                 if (message.hasImageAttachment()) {
                                     imageAttachmentStore.delete(message.getAttachmentPath());
                                 }
@@ -1059,8 +1034,7 @@ public final class ChatActivity extends AppCompatActivity {
         messageAdapter.close();
         mainHandler.removeCallbacksAndMessages(null);
         databaseExecutor.execute(() -> {
-            historyStore.close();
-            characterRepository.close();
+            chatRepository.close();
         });
         databaseExecutor.shutdown();
         imageExecutor.shutdown();

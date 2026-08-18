@@ -13,6 +13,7 @@
 
 ## M2：架构与多会话
 
+- [x] 以 `ChatRepository` 隔离角色、消息、Agent 审计和长期记忆存储。
 - [ ] `ViewModel + Repository + SavedStateHandle`。
 - [ ] 每角色多个聊天室、归档、重命名和删除保护。
 - [ ] 群聊、多角色调度与 `@` 提及。

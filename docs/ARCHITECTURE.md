@@ -1,36 +1,35 @@
-# JavaTavern MVP 架构
+# JavaTavern 架构
 
-## 目标
-
-首版优先证明四件事：原生 Android 页面组织、Java 并发与生命周期意识、本地数据持久化、可替换的模型服务边界。
-
-## 分层
+## 当前边界
 
 ```text
-Activity / RecyclerView Adapter
-              |
-              v
-CharacterRepository / ChatHistoryStore
-              |
-              v
-SQLite                  ReplyEngine
-                           |
-                           v
-                    Mock / Remote API
+ChatActivity + RecyclerView
+  ├─ ChatRepository
+  │    ├─ CharacterRepository
+  │    ├─ ChatHistoryStore
+  │    └─ LongTermMemoryStore
+  ├─ CharacterCardParser / WorldBookPromptBuilder
+  ├─ ImageAttachmentStore / MessageImageLoader
+  ├─ LocalAgentRouter
+  └─ OpenAiCompatibleClient / SseEventParser
 ```
 
-## 关键取舍
+`ChatRepository` 是聊天页面唯一的数据访问边界，统一角色、消息、搜索、Agent 审计和确认式长期记忆。`ChatActivity` 仍负责网络编排、临时输入和列表更新，这是下一阶段需要继续拆分的部分。
 
-- 使用 Java 17 与 XML View，突出用户已有 Java 能力，并补齐 Android 原生基础。
-- MVP 使用 `SQLiteOpenHelper` 展示数据库原理；第二阶段迁移 Room，形成可讨论的重构过程。
-- 数据库操作放入单线程 `ExecutorService`，UI 更新切回主线程。
-- `ReplyEngine` 隔离回复来源，当前离线模拟，后续替换为 OpenAI-compatible 流式客户端。
-- API Key 暂未参与网络请求；正式接入前必须使用加密存储，日志中禁止打印密钥。
+## 已落实的工程约束
 
-## 面向 vivo 岗位的后续强化
+- Java 17 与 XML Views，最低 Android 7.0。
+- SQLite v1→v6 增量迁移，不通过删库规避兼容问题。
+- 数据库使用单线程 `ExecutorService`，UI 更新切回主线程。
+- OpenAI-compatible SSE 请求支持 50 ms 合并刷新、停止和生命周期取消。
+- 图片后台压缩后写入私有目录，列表使用 LRU 缓存异步解码。
+- API Key 使用 Android Keystore AES/GCM，加密配置只允许 HTTPS。
+- Agent 写操作经过提案、确认、事务执行、结果和审计。
+- 长期记忆只能由用户管理，并以长度受限的背景段落注入 Prompt。
 
-- 生命周期与状态恢复：旋转、进后台、进程被回收。
-- 性能：首屏、消息长列表、数据库分页、内存与卡顿分析。
-- 稳定性：弱网、超时、重试、请求取消和离线降级。
-- 系统适配：通知权限、深色模式、字体缩放、不同分辨率与 vivo 真机验证。
-- 工程质量：单元测试、UI 测试、R8、构建变体和 CI。
+## 下一阶段
+
+1. 引入 `ChatViewModel + SavedStateHandle`，接管加载、发送、流式状态和旋转恢复。
+2. 增加 `conversations`、`message_variants` 与分支关系，支持多会话和左右切换。
+3. 把 Provider、AgentTool、备份恢复抽象为独立接口，减少 Activity 条件分支。
+4. 增加数据库迁移测试、UI 测试和 Macrobenchmark。
