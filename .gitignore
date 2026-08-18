@@ -14,3 +14,4 @@ keystore.properties
 *.log
 /device-artifacts/
 /lint-results/
+/docs/CLAUDE_REVIEW_PROMPT.md
