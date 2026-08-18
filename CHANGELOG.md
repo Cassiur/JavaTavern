@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.0-preview - 2026-08-18
+
+- Added reply quotes that are persisted and included in model context.
+- Added emoji reactions with SQLite persistence.
+- Added assistant-message regeneration for remote and offline reply engines.
+- Migrated the message database from v5 to v6 without deleting existing chats.
+- Added interaction model tests and an audited AiChat feature matrix.
+
 All notable changes are documented here. The project follows Semantic Versioning after `1.0.0`.
 
 ## Unreleased

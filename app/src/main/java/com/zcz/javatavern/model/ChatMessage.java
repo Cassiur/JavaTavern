@@ -33,6 +33,9 @@ public final class ChatMessage {
     private final ActionState actionState;
     private final String attachmentPath;
     private final String attachmentMimeType;
+    private final long replyToMessageId;
+    private final String replyPreview;
+    private final String reaction;
 
     public ChatMessage(long id, Role role, String content, long createdAt) {
         this(id, role, Kind.TEXT, "", content, createdAt);
@@ -88,6 +91,40 @@ public final class ChatMessage {
             String attachmentPath,
             String attachmentMimeType
     ) {
+        this(
+                id,
+                role,
+                kind,
+                title,
+                content,
+                createdAt,
+                actionToken,
+                actionType,
+                actionState,
+                attachmentPath,
+                attachmentMimeType,
+                -1,
+                "",
+                ""
+        );
+    }
+
+    public ChatMessage(
+            long id,
+            Role role,
+            Kind kind,
+            String title,
+            String content,
+            long createdAt,
+            String actionToken,
+            String actionType,
+            ActionState actionState,
+            String attachmentPath,
+            String attachmentMimeType,
+            long replyToMessageId,
+            String replyPreview,
+            String reaction
+    ) {
         this.id = id;
         this.role = role;
         this.kind = kind;
@@ -99,6 +136,9 @@ public final class ChatMessage {
         this.actionState = actionState;
         this.attachmentPath = attachmentPath;
         this.attachmentMimeType = attachmentMimeType;
+        this.replyToMessageId = replyToMessageId;
+        this.replyPreview = replyPreview;
+        this.reaction = reaction;
     }
 
     public long getId() {
@@ -145,7 +185,27 @@ public final class ChatMessage {
         return attachmentMimeType;
     }
 
+    public long getReplyToMessageId() {
+        return replyToMessageId;
+    }
+
+    public String getReplyPreview() {
+        return replyPreview;
+    }
+
+    public String getReaction() {
+        return reaction;
+    }
+
     public boolean hasImageAttachment() {
         return !attachmentPath.isEmpty() && attachmentMimeType.startsWith("image/");
+    }
+
+    public boolean hasReply() {
+        return replyToMessageId > 0 && !replyPreview.isEmpty();
+    }
+
+    public boolean hasReaction() {
+        return !reaction.isEmpty();
     }
 }

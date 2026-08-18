@@ -170,14 +170,18 @@ public final class OpenAiCompatibleClient implements AutoCloseable {
     }
 
     private Object buildMessageContent(ChatMessage message) throws IOException, JSONException {
+        String textContent = message.getContent();
+        if (message.hasReply()) {
+            textContent = "[回复：" + message.getReplyPreview() + "]\n" + textContent;
+        }
         if (!message.hasImageAttachment()) {
-            return message.getContent();
+            return textContent;
         }
         JSONArray content = new JSONArray();
-        if (!message.getContent().trim().isEmpty()) {
+        if (!textContent.trim().isEmpty()) {
             content.put(new JSONObject()
                     .put("type", "text")
-                    .put("text", message.getContent()));
+                    .put("text", textContent));
         }
         content.put(new JSONObject()
                 .put("type", "image_url")

@@ -13,6 +13,18 @@
         android:maxWidth="300dp"
         android:orientation="vertical">
 
+        <TextView
+            android:id="@+id/messageReplyPreview"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:ellipsize="end"
+            android:maxLines="2"
+            android:paddingStart="14dp"
+            android:paddingTop="9dp"
+            android:paddingEnd="14dp"
+            android:textSize="12sp"
+            android:visibility="gone" />
+
         <ImageView
             android:id="@+id/messageImage"
             android:layout_width="240dp"
@@ -30,6 +42,17 @@
             android:paddingEnd="14dp"
             android:paddingBottom="10dp"
             android:textSize="16sp" />
+
+        <TextView
+            android:id="@+id/messageReaction"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="end"
+            android:paddingStart="10dp"
+            android:paddingEnd="10dp"
+            android:paddingBottom="6dp"
+            android:textSize="18sp"
+            android:visibility="gone" />
 
     </LinearLayout>
 

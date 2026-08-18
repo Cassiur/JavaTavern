@@ -44,6 +44,7 @@ import com.zcz.javatavern.service.ReplyEngine;
 import com.zcz.javatavern.ui.MessageAdapter;
 
 import java.util.List;
+import java.util.ArrayList;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -72,6 +73,9 @@ public final class ChatActivity extends AppCompatActivity {
     private MaterialButton attachImageButton;
     private View attachmentPreview;
     private ImageView attachmentPreviewImage;
+    private View replyPreview;
+    private TextView replyPreviewText;
+    private ChatMessage pendingReplyMessage;
     private ImageAttachmentStore imageAttachmentStore;
     private ActivityResultLauncher<PickVisualMediaRequest> imagePicker;
     private String pendingAttachmentPath = "";
@@ -134,6 +138,8 @@ public final class ChatActivity extends AppCompatActivity {
         attachImageButton = findViewById(R.id.attachImageButton);
         attachmentPreview = findViewById(R.id.attachmentPreview);
         attachmentPreviewImage = findViewById(R.id.attachmentPreviewImage);
+        replyPreview = findViewById(R.id.replyPreview);
+        replyPreviewText = findViewById(R.id.replyPreviewText);
         messageInput.setEnabled(false);
         sendButton.setEnabled(false);
         attachImageButton.setEnabled(false);
@@ -149,6 +155,7 @@ public final class ChatActivity extends AppCompatActivity {
         findViewById(R.id.removeAttachmentButton).setOnClickListener(view ->
                 clearPendingAttachment(true)
         );
+        findViewById(R.id.removeReplyButton).setOnClickListener(view -> clearPendingReply());
         findViewById(R.id.searchMessagesButton).setOnClickListener(view -> showSearchDialog());
         sendButton.setOnClickListener(view -> handlePrimaryAction());
         messageInput.setOnEditorActionListener((view, actionId, event) -> {
@@ -359,12 +366,19 @@ public final class ChatActivity extends AppCompatActivity {
         String content = messageInput.getText().toString().trim();
         String attachmentPath = pendingAttachmentPath;
         String attachmentMimeType = pendingAttachmentMimeType;
+        long replyToMessageId = pendingReplyMessage == null
+                ? -1
+                : pendingReplyMessage.getId();
+        String replyPreviewText = pendingReplyMessage == null
+                ? ""
+                : buildMessageReference(pendingReplyMessage);
         if (content.isEmpty() && attachmentPath.isEmpty()) {
             return;
         }
         messageInput.setText("");
         draftStore.clear(characterId);
         clearPendingAttachment(false);
+        clearPendingReply();
 
         long userCreatedAt = System.currentTimeMillis();
         ChatMessage userMessage = new ChatMessage(
@@ -378,7 +392,10 @@ public final class ChatActivity extends AppCompatActivity {
                 "",
                 ChatMessage.ActionState.NONE,
                 attachmentPath,
-                attachmentMimeType
+                attachmentMimeType,
+                replyToMessageId,
+                replyPreviewText,
+                ""
         );
         messageAdapter.add(userMessage);
         scrollToLatest();
@@ -394,7 +411,10 @@ public final class ChatActivity extends AppCompatActivity {
                     userMessage.getActionType(),
                     userMessage.getActionState(),
                     userMessage.getAttachmentPath(),
-                    userMessage.getAttachmentMimeType()
+                    userMessage.getAttachmentMimeType(),
+                    userMessage.getReplyToMessageId(),
+                    userMessage.getReplyPreview(),
+                    userMessage.getReaction()
             );
             mainHandler.post(() -> messageAdapter.assignPersistedId(
                     userCreatedAt,
@@ -465,6 +485,36 @@ public final class ChatActivity extends AppCompatActivity {
         if (deleteFile && !pathToDelete.isEmpty()) {
             imageExecutor.execute(() -> imageAttachmentStore.delete(pathToDelete));
         }
+    }
+
+    private void beginReply(ChatMessage message) {
+        pendingReplyMessage = message;
+        replyPreviewText.setText(getString(
+                R.string.replying_to,
+                buildMessageReference(message)
+        ));
+        replyPreview.setVisibility(View.VISIBLE);
+        messageInput.requestFocus();
+    }
+
+    private void clearPendingReply() {
+        pendingReplyMessage = null;
+        replyPreviewText.setText("");
+        replyPreview.setVisibility(View.GONE);
+    }
+
+    private String buildMessageReference(ChatMessage message) {
+        String content = message.getContent().replace('\n', ' ').trim();
+        if (content.isEmpty() && message.hasImageAttachment()) {
+            content = "[图片]";
+        }
+        if (content.length() > 80) {
+            content = content.substring(0, 80) + "…";
+        }
+        String speaker = message.getRole() == ChatMessage.Role.USER
+                ? "我"
+                : character.getName();
+        return speaker + "：" + content;
     }
 
     private void addAgentCard(AgentCard card) {
@@ -813,23 +863,93 @@ public final class ChatActivity extends AppCompatActivity {
             copyMessage(message);
             return;
         }
-        String[] actions = {
-                getString(R.string.copy_message),
-                getString(R.string.edit_message),
-                getString(R.string.delete_message)
-        };
+        List<String> actions = new ArrayList<>();
+        actions.add(getString(R.string.copy_message));
+        actions.add(getString(R.string.reply_message));
+        if (message.getRole() == ChatMessage.Role.ASSISTANT) {
+            actions.add(getString(R.string.regenerate_message));
+        }
+        actions.add(getString(R.string.react_message));
+        actions.add(getString(R.string.edit_message));
+        actions.add(getString(R.string.delete_message));
         new MaterialAlertDialogBuilder(this)
                 .setTitle(R.string.message_actions)
-                .setItems(actions, (dialog, which) -> {
-                    if (which == 0) {
+                .setItems(actions.toArray(new String[0]), (dialog, which) -> {
+                    String action = actions.get(which);
+                    if (action.equals(getString(R.string.copy_message))) {
                         copyMessage(message);
-                    } else if (which == 1) {
+                    } else if (action.equals(getString(R.string.reply_message))) {
+                        beginReply(message);
+                    } else if (action.equals(getString(R.string.regenerate_message))) {
+                        regenerateMessage(message);
+                    } else if (action.equals(getString(R.string.react_message))) {
+                        showReactionPicker(message);
+                    } else if (action.equals(getString(R.string.edit_message))) {
                         editMessage(message);
                     } else {
                         confirmDeleteMessage(message);
                     }
                 })
                 .show();
+    }
+
+    private void showReactionPicker(ChatMessage message) {
+        String[] reactions = {"👍", "❤️", "😂", "😮", "😢", getString(R.string.remove_reaction)};
+        new MaterialAlertDialogBuilder(this)
+                .setTitle(R.string.react_message)
+                .setItems(reactions, (dialog, which) -> {
+                    String reaction = which == reactions.length - 1 ? "" : reactions[which];
+                    databaseExecutor.execute(() -> {
+                        try {
+                            historyStore.updateMessageReaction(message.getId(), reaction);
+                            mainHandler.post(() -> messageAdapter.updateReaction(
+                                    message.getId(),
+                                    reaction
+                            ));
+                        } catch (RuntimeException exception) {
+                            mainHandler.post(this::showMessageActionFailure);
+                        }
+                    });
+                })
+                .show();
+    }
+
+    private void regenerateMessage(ChatMessage message) {
+        if (activeStream != null || message.getRole() != ChatMessage.Role.ASSISTANT) {
+            return;
+        }
+        databaseExecutor.execute(() -> {
+            ChatMessage source = historyStore.loadPreviousUserMessage(
+                    characterId,
+                    message.getId()
+            );
+            if (source == null) {
+                mainHandler.post(() -> Toast.makeText(
+                        this,
+                        R.string.cannot_regenerate,
+                        Toast.LENGTH_SHORT
+                ).show());
+                return;
+            }
+            try {
+                historyStore.deleteMessage(message.getId());
+            } catch (RuntimeException exception) {
+                mainHandler.post(this::showMessageActionFailure);
+                return;
+            }
+            mainHandler.post(() -> {
+                messageAdapter.removeMessage(message.getId());
+                ModelSettings settings = settingsStore.load();
+                if (settings.isRemoteConfigured()) {
+                    startStreaming(settings);
+                } else {
+                    String input = source.getContent().isEmpty()
+                            ? "我发送了一张图片。"
+                            : source.getContent();
+                    addMockReply(input);
+                }
+            });
+        });
     }
 
     private void copyMessage(ChatMessage message) {
@@ -886,6 +1006,10 @@ public final class ChatActivity extends AppCompatActivity {
                                     imageAttachmentStore.delete(message.getAttachmentPath());
                                 }
                                 mainHandler.post(() -> {
+                                    if (pendingReplyMessage != null
+                                            && pendingReplyMessage.getId() == message.getId()) {
+                                        clearPendingReply();
+                                    }
                                     messageAdapter.removeMessage(message.getId());
                                     Toast.makeText(this, R.string.message_deleted, Toast.LENGTH_SHORT).show();
                                 });
@@ -916,6 +1040,7 @@ public final class ChatActivity extends AppCompatActivity {
         }
         modelClient.close();
         clearPendingAttachment(true);
+        clearPendingReply();
         messageAdapter.close();
         mainHandler.removeCallbacksAndMessages(null);
         databaseExecutor.execute(() -> {

@@ -78,7 +78,10 @@ public final class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.Me
                         && oldMessage.getContent().equals(newMessage.getContent())
                         && oldMessage.getTitle().equals(newMessage.getTitle())
                         && oldMessage.getActionState() == newMessage.getActionState()
-                        && oldMessage.getAttachmentPath().equals(newMessage.getAttachmentPath());
+                        && oldMessage.getAttachmentPath().equals(newMessage.getAttachmentPath())
+                        && oldMessage.getReplyToMessageId() == newMessage.getReplyToMessageId()
+                        && oldMessage.getReplyPreview().equals(newMessage.getReplyPreview())
+                        && oldMessage.getReaction().equals(newMessage.getReaction());
             }
         });
         messages.clear();
@@ -133,7 +136,12 @@ public final class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.Me
                     message.getCreatedAt(),
                     message.getActionToken(),
                     message.getActionType(),
-                    actionState
+                    actionState,
+                    message.getAttachmentPath(),
+                    message.getAttachmentMimeType(),
+                    message.getReplyToMessageId(),
+                    message.getReplyPreview(),
+                    message.getReaction()
             ));
             notifyItemChanged(index);
             return;
@@ -179,6 +187,33 @@ public final class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.Me
         }
     }
 
+    public void updateReaction(long messageId, String reaction) {
+        for (int index = 0; index < messages.size(); index++) {
+            ChatMessage message = messages.get(index);
+            if (message.getId() != messageId) {
+                continue;
+            }
+            messages.set(index, new ChatMessage(
+                    message.getId(),
+                    message.getRole(),
+                    message.getKind(),
+                    message.getTitle(),
+                    message.getContent(),
+                    message.getCreatedAt(),
+                    message.getActionToken(),
+                    message.getActionType(),
+                    message.getActionState(),
+                    message.getAttachmentPath(),
+                    message.getAttachmentMimeType(),
+                    message.getReplyToMessageId(),
+                    message.getReplyPreview(),
+                    reaction
+            ));
+            notifyItemChanged(index);
+            return;
+        }
+    }
+
     public List<ChatMessage> snapshotRecentTextMessages(int limit) {
         return ConversationWindow.selectRecentText(messages, limit);
     }
@@ -221,14 +256,22 @@ public final class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.Me
         });
         holder.cardActions.setVisibility(View.GONE);
         bindImage(holder, message);
+        holder.replyPreview.setText(message.getReplyPreview());
+        holder.replyPreview.setVisibility(message.hasReply() ? View.VISIBLE : View.GONE);
         holder.content.setText(message.getContent());
         holder.content.setVisibility(message.getContent().isEmpty() ? View.GONE : View.VISIBLE);
+        holder.reaction.setText(message.getReaction());
+        holder.reaction.setVisibility(message.hasReaction() ? View.VISIBLE : View.GONE);
         holder.bubble.setBackgroundResource(
                 isUser ? R.drawable.bg_message_user : R.drawable.bg_message_assistant
         );
         holder.content.setTextColor(ContextCompat.getColor(
                 holder.itemView.getContext(),
                 isUser ? android.R.color.white : R.color.text_primary
+        ));
+        holder.replyPreview.setTextColor(ContextCompat.getColor(
+                holder.itemView.getContext(),
+                isUser ? android.R.color.white : R.color.text_secondary
         ));
     }
 
@@ -280,13 +323,18 @@ public final class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.Me
                 message.getActionType(),
                 message.getActionState(),
                 message.getAttachmentPath(),
-                message.getAttachmentMimeType()
+                message.getAttachmentMimeType(),
+                message.getReplyToMessageId(),
+                message.getReplyPreview(),
+                message.getReaction()
         );
     }
 
     static final class MessageViewHolder extends RecyclerView.ViewHolder {
         private final LinearLayout container;
         private final TextView content;
+        private final TextView replyPreview;
+        private final TextView reaction;
         private final View bubble;
         private final ImageView image;
         private final View card;
@@ -302,6 +350,8 @@ public final class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.Me
             super(itemView);
             container = itemView.findViewById(R.id.messageContainer);
             content = itemView.findViewById(R.id.messageContent);
+            replyPreview = itemView.findViewById(R.id.messageReplyPreview);
+            reaction = itemView.findViewById(R.id.messageReaction);
             bubble = itemView.findViewById(R.id.messageBubble);
             image = itemView.findViewById(R.id.messageImage);
             card = itemView.findViewById(R.id.agentCard);

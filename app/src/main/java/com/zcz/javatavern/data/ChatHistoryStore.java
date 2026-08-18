@@ -14,14 +14,15 @@ import java.util.List;
 
 public final class ChatHistoryStore extends SQLiteOpenHelper {
     private static final String DATABASE_NAME = "java_tavern.db";
-    private static final int DATABASE_VERSION = 5;
+    private static final int DATABASE_VERSION = 6;
     private static final String TABLE_MESSAGES = "messages";
     private static final String TABLE_AGENT_AUDIT = "agent_audit";
     private static final String TABLE_MESSAGES_FTS = "messages_fts";
     private static final String[] MESSAGE_COLUMNS = new String[]{
             "id", "role", "kind", "title", "content", "created_at",
             "action_token", "action_type", "action_state",
-            "attachment_path", "attachment_mime_type"
+            "attachment_path", "attachment_mime_type",
+            "reply_to_message_id", "reply_preview", "reaction"
     };
 
     public ChatHistoryStore(Context context) {
@@ -42,6 +43,9 @@ public final class ChatHistoryStore extends SQLiteOpenHelper {
                         "action_state TEXT NOT NULL DEFAULT 'NONE'," +
                         "attachment_path TEXT NOT NULL DEFAULT ''," +
                         "attachment_mime_type TEXT NOT NULL DEFAULT ''," +
+                        "reply_to_message_id INTEGER NOT NULL DEFAULT -1," +
+                        "reply_preview TEXT NOT NULL DEFAULT ''," +
+                        "reaction TEXT NOT NULL DEFAULT ''," +
                         "content TEXT NOT NULL," +
                         "created_at INTEGER NOT NULL)"
         );
@@ -96,6 +100,20 @@ public final class ChatHistoryStore extends SQLiteOpenHelper {
                     "INSERT INTO " + TABLE_MESSAGES_FTS + "(content, character_id, message_id) " +
                             "SELECT content, character_id, id FROM " + TABLE_MESSAGES +
                             " WHERE content != ''"
+            );
+        }
+        if (oldVersion < 6) {
+            database.execSQL(
+                    "ALTER TABLE " + TABLE_MESSAGES +
+                            " ADD COLUMN reply_to_message_id INTEGER NOT NULL DEFAULT -1"
+            );
+            database.execSQL(
+                    "ALTER TABLE " + TABLE_MESSAGES +
+                            " ADD COLUMN reply_preview TEXT NOT NULL DEFAULT ''"
+            );
+            database.execSQL(
+                    "ALTER TABLE " + TABLE_MESSAGES +
+                            " ADD COLUMN reaction TEXT NOT NULL DEFAULT ''"
             );
         }
     }
@@ -162,7 +180,8 @@ public final class ChatHistoryStore extends SQLiteOpenHelper {
         try (Cursor cursor = getReadableDatabase().rawQuery(
                 "SELECT m.id, m.role, m.kind, m.title, m.content, m.created_at, " +
                         "m.action_token, m.action_type, m.action_state, " +
-                        "m.attachment_path, m.attachment_mime_type " +
+                        "m.attachment_path, m.attachment_mime_type, " +
+                        "m.reply_to_message_id, m.reply_preview, m.reaction " +
                         "FROM " + TABLE_MESSAGES_FTS + " f JOIN " + TABLE_MESSAGES +
                         " m ON m.id = CAST(f.message_id AS INTEGER) " +
                         "WHERE f.character_id = ? AND f.content MATCH ? " +
@@ -286,6 +305,40 @@ public final class ChatHistoryStore extends SQLiteOpenHelper {
             String attachmentPath,
             String attachmentMimeType
     ) {
+        return addMessage(
+                characterId,
+                role,
+                kind,
+                title,
+                content,
+                createdAt,
+                actionToken,
+                actionType,
+                actionState,
+                attachmentPath,
+                attachmentMimeType,
+                -1,
+                "",
+                ""
+        );
+    }
+
+    public long addMessage(
+            String characterId,
+            ChatMessage.Role role,
+            ChatMessage.Kind kind,
+            String title,
+            String content,
+            long createdAt,
+            String actionToken,
+            String actionType,
+            ChatMessage.ActionState actionState,
+            String attachmentPath,
+            String attachmentMimeType,
+            long replyToMessageId,
+            String replyPreview,
+            String reaction
+    ) {
         ContentValues values = new ContentValues();
         values.put("character_id", characterId);
         values.put("role", role.name());
@@ -296,6 +349,9 @@ public final class ChatHistoryStore extends SQLiteOpenHelper {
         values.put("action_state", actionState.name());
         values.put("attachment_path", attachmentPath);
         values.put("attachment_mime_type", attachmentMimeType);
+        values.put("reply_to_message_id", replyToMessageId);
+        values.put("reply_preview", replyPreview);
+        values.put("reaction", reaction);
         values.put("content", content);
         values.put("created_at", createdAt);
         return getWritableDatabase().insertOrThrow(TABLE_MESSAGES, null, values);
@@ -350,6 +406,41 @@ public final class ChatHistoryStore extends SQLiteOpenHelper {
         if (deletedRows != 1) {
             throw new IllegalArgumentException("消息不存在");
         }
+    }
+
+    public void updateMessageReaction(long messageId, String reaction) {
+        ContentValues values = new ContentValues();
+        values.put("reaction", reaction);
+        int updatedRows = getWritableDatabase().update(
+                TABLE_MESSAGES,
+                values,
+                "id = ?",
+                new String[]{Long.toString(messageId)}
+        );
+        if (updatedRows != 1) {
+            throw new IllegalArgumentException("消息不存在");
+        }
+    }
+
+    public ChatMessage loadPreviousUserMessage(String characterId, long beforeMessageId) {
+        List<ChatMessage> messages = new ArrayList<>();
+        try (Cursor cursor = getReadableDatabase().query(
+                TABLE_MESSAGES,
+                MESSAGE_COLUMNS,
+                "character_id = ? AND role = ? AND id < ?",
+                new String[]{
+                        characterId,
+                        ChatMessage.Role.USER.name(),
+                        Long.toString(beforeMessageId)
+                },
+                null,
+                null,
+                "id DESC",
+                "1"
+        )) {
+            readMessages(cursor, messages);
+        }
+        return messages.isEmpty() ? null : messages.get(0);
     }
 
     public void updateActionState(String actionToken, ChatMessage.ActionState actionState) {
@@ -510,7 +601,10 @@ public final class ChatHistoryStore extends SQLiteOpenHelper {
                     cursor.getString(7),
                     ChatMessage.ActionState.valueOf(cursor.getString(8)),
                     cursor.getString(9),
-                    cursor.getString(10)
+                    cursor.getString(10),
+                    cursor.getLong(11),
+                    cursor.getString(12),
+                    cursor.getString(13)
             ));
         }
     }
