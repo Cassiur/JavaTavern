@@ -21,6 +21,7 @@ JavaTavern is a local-first Android character chat app built with Java and XML V
 - Recent-message keyset pagination, FTS search, and context jump.
 - Per-character draft recovery plus message copy, edit, and delete actions.
 - Reply quotes, emoji reactions, and assistant-message regeneration.
+- User-confirmed per-character long-term memories with bounded prompt injection.
 - Local command cards, including confirmed and audited conversation clearing.
 - Android Keystore-backed API-key encryption and disabled Android backup.
 

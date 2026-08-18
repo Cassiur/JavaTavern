@@ -5,6 +5,7 @@
 - Added reply quotes that are persisted and included in model context.
 - Added emoji reactions with SQLite persistence.
 - Added assistant-message regeneration for remote and offline reply engines.
+- Added a per-character long-term memory manager; only user-confirmed entries are injected.
 - Migrated the message database from v5 to v6 without deleting existing chats.
 - Added interaction model tests and an audited AiChat feature matrix.
 

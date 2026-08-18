@@ -3,6 +3,7 @@ package com.zcz.javatavern;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
+import android.content.Intent;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.net.Uri;
@@ -38,6 +39,7 @@ import com.zcz.javatavern.model.AgentCard;
 import com.zcz.javatavern.model.CharacterProfile;
 import com.zcz.javatavern.model.ChatMessage;
 import com.zcz.javatavern.media.ImageAttachmentStore;
+import com.zcz.javatavern.memory.LongTermMemoryStore;
 import com.zcz.javatavern.network.OpenAiCompatibleClient;
 import com.zcz.javatavern.service.MockReplyEngine;
 import com.zcz.javatavern.service.ReplyEngine;
@@ -65,6 +67,7 @@ public final class ChatActivity extends AppCompatActivity {
     private ChatHistoryStore historyStore;
     private ConversationDraftStore draftStore;
     private SecureModelSettingsStore settingsStore;
+    private LongTermMemoryStore memoryStore;
     private MessageAdapter messageAdapter;
     private RecyclerView messageList;
     private LinearLayoutManager messageLayoutManager;
@@ -102,6 +105,7 @@ public final class ChatActivity extends AppCompatActivity {
         historyStore = new ChatHistoryStore(getApplicationContext());
         draftStore = new ConversationDraftStore(getApplicationContext());
         settingsStore = new SecureModelSettingsStore(getApplicationContext());
+        memoryStore = new LongTermMemoryStore(getApplicationContext());
         imageAttachmentStore = new ImageAttachmentStore(getApplicationContext());
 
         TextView title = findViewById(R.id.chatTitle);
@@ -157,6 +161,7 @@ public final class ChatActivity extends AppCompatActivity {
         );
         findViewById(R.id.removeReplyButton).setOnClickListener(view -> clearPendingReply());
         findViewById(R.id.searchMessagesButton).setOnClickListener(view -> showSearchDialog());
+        findViewById(R.id.memoryButton).setOnClickListener(view -> openMemory());
         sendButton.setOnClickListener(view -> handlePrimaryAction());
         messageInput.setOnEditorActionListener((view, actionId, event) -> {
             if (actionId == EditorInfo.IME_ACTION_SEND) {
@@ -287,6 +292,15 @@ public final class ChatActivity extends AppCompatActivity {
                         searchMessages(searchInput.getText().toString())
                 )
                 .show();
+    }
+
+    private void openMemory() {
+        if (character == null) {
+            return;
+        }
+        startActivity(new Intent(this, MemoryActivity.class)
+                .putExtra(MemoryActivity.EXTRA_CHARACTER_ID, character.getId())
+                .putExtra(MemoryActivity.EXTRA_CHARACTER_NAME, character.getName()));
     }
 
     private void searchMessages(String query) {
@@ -686,6 +700,7 @@ public final class ChatActivity extends AppCompatActivity {
                 settings,
                 character,
                 contextWindow,
+                memoryStore.buildPrompt(characterId),
                 new OpenAiCompatibleClient.StreamListener() {
                     @Override
                     public void onOpen() {

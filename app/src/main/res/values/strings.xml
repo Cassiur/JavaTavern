@@ -42,6 +42,12 @@
     <string name="image_processing">正在处理图片…</string>
     <string name="image_process_failed">图片处理失败</string>
     <string name="search">搜索</string>
+    <string name="memory">记忆</string>
+    <string name="memory_for_character">%1$s 的长期记忆</string>
+    <string name="memory_description">只有你手动确认的内容才会保存，并作为背景注入模型请求。模型不能直接修改这里。</string>
+    <string name="memory_hint">写下一条希望长期保留的事实或偏好…</string>
+    <string name="add_memory">添加</string>
+    <string name="delete_memory_title">删除这条长期记忆？</string>
     <string name="search_messages">搜索当前会话</string>
     <string name="search_hint">输入消息关键词</string>
     <string name="no_search_results">没有找到匹配消息</string>
