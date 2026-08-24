@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Dark palette ("暗紫夜店" night-tavern mood), aligned with AiChat's dark
+  semantic tokens. Every key mirrors values/colors.xml so the DayNight theme
+  swaps automatically. Primary brightens for contrast; soft surfaces darken.
+-->
+<resources>
+    <color name="primary">#C9B8F0</color>
+    <color name="primary_dark">#B19CDD</color>
+    <color name="primary_soft">#2E2740</color>
+    <color name="on_primary">#241C38</color>
+    <color name="background">#141119</color>
+    <color name="surface">#1E1A26</color>
+    <color name="input_background">#2A2434</color>
+    <color name="border">#3A3346</color>
+    <color name="text_primary">#EBE6F2</color>
+    <color name="text_secondary">#A79EB2</color>
+    <color name="warning">#E0A48F</color>
+    <color name="success">#82C7A3</color>
+</resources>

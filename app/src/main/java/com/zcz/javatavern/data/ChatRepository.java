@@ -3,8 +3,10 @@ package com.zcz.javatavern.data;
 import android.content.Context;
 
 import com.zcz.javatavern.memory.LongTermMemoryStore;
+import com.zcz.javatavern.model.CharacterCardData;
 import com.zcz.javatavern.model.CharacterProfile;
 import com.zcz.javatavern.model.ChatMessage;
+import com.zcz.javatavern.model.HomeFeedItem;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -49,6 +51,30 @@ public final class ChatRepository implements AutoCloseable {
         memoryStore = new LongTermMemoryStore(applicationContext);
     }
 
+    /** Delegates character-card import to the underlying character store. */
+    public CharacterProfile importCard(CharacterCardData card) {
+        return characterRepository.importCard(card);
+    }
+
+    /**
+     * Builds the home feed: every character paired with their most recent
+     * message (or greeting when none exists yet), sorted by recent activity.
+     */
+    public List<HomeFeedItem> loadHomeFeed() {
+        List<CharacterProfile> characters = characterRepository.getCharacters();
+        java.util.Map<String, ChatMessage> latestByCharacter =
+                historyStore.loadLatestMessagesByCharacter();
+        List<HomeFeedItem> feed = new ArrayList<>(characters.size());
+        for (CharacterProfile character : characters) {
+            ChatMessage latest = latestByCharacter.get(character.getId());
+            String preview = latest != null ? latest.getContent() : character.getGreeting();
+            long lastActivityAt = latest != null ? latest.getCreatedAt() : 0L;
+            feed.add(new HomeFeedItem(character, preview, lastActivityAt));
+        }
+        feed.sort(HomeFeedItem.BY_RECENT);
+        return feed;
+    }
+
     public SessionData loadSession(String requestedCharacterId, int pageSize) {
         CharacterProfile character = characterRepository.findById(requestedCharacterId);
         if (character == null) {
@@ -79,6 +105,24 @@ public final class ChatRepository implements AutoCloseable {
 
     public List<ChatMessage> loadMessagesBefore(String characterId, long beforeId, int limit) {
         return historyStore.loadMessagesBefore(characterId, beforeId, limit);
+    }
+
+    /** 群聊消息：groupId 作为 character_id。 */
+    public List<ChatMessage> loadGroupMessages(String groupId) {
+        return historyStore.loadMessages(groupId);
+    }
+
+    /** 群聊消息写入：额外记录发言角色。 */
+    public long addGroupMessage(
+            String groupId,
+            ChatMessage.Role role,
+            String content,
+            long createdAt,
+            String speakerId,
+            String speakerName
+    ) {
+        return historyStore.addGroupMessage(
+                groupId, role, content, createdAt, speakerId, speakerName);
     }
 
     public List<ChatMessage> searchMessages(String characterId, String query, int limit) {

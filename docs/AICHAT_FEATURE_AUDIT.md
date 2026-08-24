@@ -1,68 +1,61 @@
 # JavaTavern 与 AiChat 功能核验
 
-核验日期：2026-08-18
+核验日期：2026-08-23
 
 ## 结论
 
-JavaTavern 当前是一个可安装、可演示的原生 Android AI 角色聊天 MVP，并不是 AiChat 0.7 的 Java 全量复刻。项目已经覆盖私聊、流式协议、多模态图片输入、本地历史、基础角色卡/世界书、受控 Agent 和移动端安全等主链路；群聊、长期记忆、创意写作、生图、动态、完整预设与数据导出等能力尚未实现。
+JavaTavern 是原生 Java Android 本地优先角色聊天客户端，不是 AiChat 的全量复刻。当前已形成可安装、可配置、可导入角色并持续聊天的完整主链路，覆盖私聊、基础群聊、SSE 流式、多模态图片、JSON/PNG 角色卡、世界书、生成参数预设、本地历史、确认式长期记忆与受控 Agent。创意写作、生图、动态、完整 Agent 工具体系和跨设备备份仍未实现。
 
 ## 已实现
 
 | 能力 | JavaTavern 当前实现 |
 | --- | --- |
-| 原生 Android | Java 17、XML Views、RecyclerView；不是 WebView 或 Tauri 套壳 |
-| 一对一角色聊天 | 分角色 SQLite 历史、连续上下文、离线演示回复 |
-| 流式回复 | OpenAI-compatible SSE、50 ms 合并刷新、停止生成、生命周期取消 |
-| 图片输入 | Android Photo Picker、后台压缩、私有目录存储、LRU 加载、多模态 `image_url` 请求 |
-| 消息管理 | 草稿恢复、复制、编辑、删除、回复引用、emoji 反应、助手回复重新生成、最近消息键集分页 |
-| 聊天搜索 | 当前角色会话内 SQLite FTS 搜索、结果列表、上下文跳转 |
-| 角色管理 | App 内创建/编辑角色；SillyTavern V2 JSON 基础字段导入 |
-| 基础世界书 | 导入关键词条目和常驻条目；按最近对话触发并注入 Prompt |
-| 模型连接 | OpenAI、DeepSeek、OpenRouter 与自定义 OpenAI-compatible 预设；`/models` 连接检查 |
-| 受控 Agent | `/plan`、`/status`、`/clear`；清空操作经过提案、确认、事务执行、结果与审计 |
-| 原生状态卡 | 普通 Agent 卡、危险操作提案卡、执行结果卡 |
-| 本地安全 | API Key 使用 Android Keystore AES/GCM；仅允许 HTTPS；禁用系统备份 |
-| 确认式长期记忆 | 用户手动新增/删除角色记忆；单条、数量和 Prompt 长度受限；模型不能直接写入 |
-| 基础性能治理 | DiffUtil、键集分页、图片缓存、首帧埋点、流式刷新节流 |
+| 原生 Android | Java 17、XML Views、RecyclerView；最低 Android 7.0 |
+| 私聊 | 分角色历史、最近上下文、离线演示回复、远程模型流式回复 |
+| 基础群聊 | 创建群聊、选择成员、手动选择本轮发言角色、保存群聊历史 |
+| 流式生命周期 | OpenAI-compatible SSE、停止生成、50 ms 合并刷新；私聊状态由 `ChatViewModel` 保留 |
+| 图片输入 | Photo Picker、后台压缩、私有目录存储、LRU 解码与 `image_url` 多模态请求 |
+| 消息能力 | 草稿、复制、编辑、删除、回复引用、emoji 反应、重新生成、键集分页、FTS 搜索与跳转 |
+| 角色管理 | App 内创建和编辑；SillyTavern V2 JSON、PNG `tEXt`/未压缩 `iTXt` 导入 |
+| 世界书 | 关键词/常驻规则、位置、顺序、优先级、深度、概率和递归字段编辑与 Prompt 注入 |
+| 模型配置 | OpenAI、DeepSeek、OpenRouter、自定义兼容端点；`/models` 连接检查 |
+| 生成预设 | 内置和自定义 temperature、top-p、max tokens、frequency/presence penalty |
+| 受控 Agent | `/plan`、`/status`、`/clear`；清空操作经过提案、确认、事务执行和审计 |
+| 长期记忆 | 用户手动确认新增/删除；限制单条、数量与 Prompt 总长度 |
+| 本地安全 | Android Keystore AES/GCM、HTTPS-only、关闭 Android 自动备份 |
+| 数据层 | 统一 `TavernDatabase`、旧库保留式迁移、消息 FTS、角色和群聊关系 |
 
 ## 部分实现
 
-| AiChat 能力 | 已有部分 | 仍然缺少 |
+| 能力 | 已有部分 | 仍然缺少 |
 | --- | --- | --- |
-| Agent 助手 | 本地指令路由、写操作确认和审计 | 自然语言工具调用、通用工具注册表、多步任务、跨轮续作、Agent Center |
-| 卡片渲染 | 本地结构化状态卡 | 服务端版本化 schema、多 ViewType 降级和复杂交互卡 |
-| 角色卡兼容 | V2 JSON 基础字段、基础世界书 | PNG 元数据、alternate greetings、example dialogue、正则脚本、导出 |
-| 世界书 | 关键词/常驻规则、字符预算 | 条件节点编辑器、命中概览、AI 自动生成 |
-| 多模型服务 | OpenAI-compatible 协议可连接多家兼容服务 | Gemini 和 Anthropic 原生协议、按会话独立模型 |
-| 多模态 | 单张图片输入与视觉请求 | 多图、相机直拍、生图、相册复用 |
-| 性能优化 | 分页、缓存、节流、启动埋点 | Macrobenchmark、万条消息报告、内存/耗电报告、vivo 真机报告 |
-| 数据可靠性 | SQLite v1→v5 迁移、私有存储 | 全量 ZIP 导入导出、冲突预览、原子恢复 |
-| 预设 | 模型服务地址和模型预设 | 酒馆 Prompt 模板、生成参数、会话级预设和推理强度覆盖 |
+| Agent 助手 | 本地指令路由、确认和审计 | 自然语言工具调用、工具注册表、多步任务、跨轮续作、Agent Center |
+| 卡片渲染 | 本地 Agent 普通卡、提案卡、结果卡 | 版本化 schema、多 ViewType 降级和复杂交互组件 |
+| 角色卡兼容 | JSON/PNG 基础字段、头像与世界书 | alternate greetings、example dialogue、压缩 `iTXt`、正则脚本和导出 |
+| 世界书 | 常驻/关键词规则和高级排序字段 | 条件图、命中解释、AI 自动生成 |
+| 群聊 | 成员管理、手动指定发言者、历史落库 | `@` 提及、自动调度、群聊 ViewModel、停止按钮和长期记忆 |
+| Provider | OpenAI-compatible 协议覆盖多家服务 | Gemini/Anthropic 原生协议、按会话独立配置、usage 统计 |
+| 数据恢复 | 统一数据库和失败保留旧库 | ZIP 导入导出、冲突预览、完整性校验、迁移 instrumentation test |
+| 性能 | 分页、DiffUtil、图片缓存、流式节流、首帧埋点 | Macrobenchmark、万条消息、弱网、内存、耗电和 vivo 真机报告 |
 
 ## 未实现
 
-- 群聊、多角色调度与 `@` 提及。
-- 左右分支与持久化消息版本历史。
-- AI 回复整轮验收、补丁修复和响应诊断。
-- 自动记忆表格、异步摘要、记忆模板与跨模块记忆共享。
-- 独立创意写作模式、剧情存档与重置。
-- 图片生成、表情包生成、自动去背景与贴图管理。
-- 动态/朋友圈、AI 评论及私聊联动。
-- 角色库、标签搜索、相似角色推荐。
-- Prompt 浏览器、请求血缘图和 Agent Center。
-- 深色模式、浅色模式切换和自定义壁纸。
-- Windows 桌面版和双栏桌面布局。
+- 持久化消息分支、左右切换和完整版本树。
+- AI 回复整轮验收、补丁修复、Prompt 浏览器与请求血缘图。
+- 自动摘要、自动记忆表格、跨模块记忆共享。
+- 独立创意写作、图片生成、贴图管理和动态/朋友圈。
+- 角色库、标签检索和相似角色推荐。
+- 自定义聊天壁纸、桌面版和大屏双栏布局。
 - 完整数据打包导入导出与跨设备恢复。
 
 ## 后续开发优先级
 
-1. 重构 `ChatActivity` 为 `ViewModel + Repository + SavedStateHandle`，先解决继续扩展时的架构债务。
-2. 在已有回复引用、emoji 反应和重新生成之上增加分支版本，为酒馆核心聊天体验补齐完整数据模型。
-3. 抽象 `AgentTool` 注册表与版本化卡片 schema，扩展创建角色、修改世界书等受控工具。
-4. 实现会话摘要和需用户确认的长期记忆，避免不可控的自动写入。
-5. 增加版本化 ZIP 导出/导入、冲突预览与恢复测试，保证本地数据可迁移。
-6. 增加群聊和 `@` 提及；之后再评估创意写作与图片生成。
+1. 为群聊补齐 ViewModel、停止生成、错误恢复和并发测试。
+2. 引入 `SavedStateHandle` 与统一 screen state，继续缩小 Activity 编排职责。
+3. 增加数据库迁移 instrumentation test 和版本化备份恢复。
+4. 建立 `AgentTool` 注册表与版本化卡片 schema，再扩展写工具。
+5. 增加消息分支、Prompt 诊断和可量化性能报告。
 
 ## 表达边界
 
-对外可以说“参考 AiChat、SillyTavern 等产品的功能边界与开放数据格式”，不能说“已经复刻 AiChat 全部核心功能”。JavaTavern 的差异化是原生 Android、明确权限、可审计 Agent、生命周期治理和可量化移动端性能，而不是复制 AiChat 的名称、女仆设定、界面、文案、资源或源码。
+对外可以说“参考 AiChat、SillyTavern 等产品的功能边界和开放格式”，不能说“已复刻全部功能”。差异化应落在原生 Android、明确权限、可审计写操作、生命周期治理和可验证工程质量，而不是复制名称、设定、界面、文案、资源或源码。

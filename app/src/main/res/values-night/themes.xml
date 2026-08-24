@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Dark variant: only flips system-bar icons to light (on dark surfaces). -->
+<resources>
+    <style name="Theme.JavaTavern" parent="Theme.JavaTavern.Base">
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+</resources>

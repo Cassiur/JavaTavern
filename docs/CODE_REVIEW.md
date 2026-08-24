@@ -1,60 +1,40 @@
 # JavaTavern 代码复审
 
+复审日期：2026-08-23
+
 ## 已解决的关键问题
 
-### 请求缺少连续上下文
-
-请求现携带最近 20 条文本或图片消息，并过滤 Agent 卡片。角色卡基础 Prompt、命中的世界书和当前对话会共同组成请求。
-
-### 流式输出频繁刷新 UI
-
-网络 delta 先进入线程安全缓冲区，每 50 ms 合并更新一次；完成和取消前强制 flush，减少 RecyclerView 重绑和主线程消息数量。
-
-### 危险 Agent 写操作直接执行
-
-`/clear` 现在生成带随机 action token 的提案卡。用户确认后，清空消息和写入结果卡在同一 SQLite 事务中完成；取消、确认、成功和失败写入独立审计表。
-
-### 长会话全量加载
-
-首屏只读最近 60 条，向上滚动按 `id < beforeId` 加载 40 条。键集分页不会像大 OFFSET 一样随着历史增长反复跳过记录。
-
-### 图片解码和持久权限风险
-
-Photo Picker 返回的 URI 不直接长期保存。图片在后台解码、缩放至最长边 1600 px、JPEG 85% 压缩后复制到应用私有目录；列表使用采样解码和 LRU 缓存。
-
-### RecyclerView 全量刷新和根布局过绘制
-
-角色和消息列表使用 DiffUtil/范围插入；主题负责窗口背景，Activity 根布局不再重复绘制同色背景。lint 从 16 条降到 2 条依赖版本提示。
-
-### 本地数据和密钥暴露
-
-系统备份/设备迁移被规则排除，API Key 使用 Keystore AES/GCM，密钥页启用 `FLAG_SECURE`，模型地址只允许 HTTPS。
+- 私聊请求携带角色设定、命中世界书、确认式记忆和最近上下文。
+- 流式 delta 通过缓冲区按 50 ms 合并刷新，终态竞争由 `StreamSession` 收敛。
+- 私聊流式生命周期迁入 `ChatViewModel`，旋转后按稳定操作 ID 恢复占位行。
+- `/clear` 必须经过提案和用户确认，清空与结果落库使用事务并记录审计。
+- 长会话使用最近 60 条首屏和 `id < beforeId` 键集分页，支持 FTS 跳转。
+- 图片复制到私有目录并采样解码；API Key 使用 Keystore AES/GCM。
+- 角色、消息、预设和群聊合并到统一 SQLite；旧库迁移失败会回滚并保留源文件。
+- PNG 导入按不可信二进制处理，拒绝无符号超大 chunk 和截断数据。
+- 群聊数据库写入移出主线程，页面销毁时取消活动请求并隔离旧回调。
 
 ## 当前主要债务
 
-### P1：ChatActivity 职责过重
+### 高优先级：群聊生命周期
 
-它仍承担 UI、分页、搜索、图片处理、Agent、网络和数据库协调。下一步必须迁移为 `ChatViewModel + ChatRepository + SavedStateHandle`，否则旋转恢复和自动化测试会越来越困难。
+群聊仍由 Activity 直接组织网络和 UI。应迁移到 ViewModel，补停止按钮、合并刷新、旋转恢复、并发终态测试和错误占位清理。
 
-### P1：数据库仍是手写 SQLiteOpenHelper
+### 高优先级：数据库迁移测试
 
-v1→v5 迁移已经在保留旧数据的模拟器上逐级验证，但缺少 migration instrumentation test。继续增加消息分支、摘要和群聊前应迁移 Room。
+统一 `SQLiteOpenHelper` 已采用事务与失败保留策略，但仍缺真实设备上的 migration instrumentation test。继续扩展分支、摘要和导入导出前必须补齐。
 
-### P1：Provider 仍是单实现
+### 中优先级：页面状态与 Provider
 
-现仅支持 OpenAI-compatible SSE。Gemini 与 Anthropic 的 URL、认证、请求和事件不同，应使用 `ModelProvider` 接口隔离，不能在 Activity 中堆条件分支。
+私聊 Activity 仍承担分页、图片和局部 UI 编排；需要 `SavedStateHandle` 和统一 screen state。Provider 目前仅抽象为 OpenAI-compatible 协议，Gemini/Anthropic 原生请求不应继续堆在同一实现中。
 
-### P2：图片与请求错误恢复
+### 中优先级：性能和错误证据
 
-需要区分文件缺失、解码失败、请求体过大、DNS、TLS、HTTP、协议和模型错误；远程模型不支持视觉时应给出可理解提示。
-
-### P2：性能证据仍不完整
-
-已有实现手段不等于性能结论。还缺 Macrobenchmark、多轮启动统计、1000/10000 条长列表、弱网、耗电和 vivo 真机数据。
+已有分页、缓存、节流和首帧埋点不等于已证明性能优秀。仍需 Macrobenchmark、1000/10000 条消息、弱网、耗电和 vivo 真机数据，并细分 TLS、HTTP、协议、模型和图片错误。
 
 ## 当前验证
 
-- 13 个 JVM 测试通过。
-- `testDebugUnitTest assembleDebug lintDebug` 通过，lint 0 error。
-- API 36 模拟器验证数据库 v2→v3→v4→v5、Agent 取消/确认、角色卡导入、图片发送重启恢复、FTS 搜索跳转。
-- 图片样例压缩后约 64 KB；单次运行进程 PSS 约 64 MB，只作为基线，不作为优化结论。
+- 18 个 JVM 测试类，102 项测试，0 failures，0 errors。
+- `testDebugUnitTest` 与 `lintDebug` 通过；lint 0 error、19 warnings。
+- `assembleDebug` 在发布前单独执行并核验 APK。
+- 仍未完成迁移 instrumentation test、旋转真机回归和群聊生命周期自动化测试。

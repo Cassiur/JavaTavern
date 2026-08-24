@@ -36,9 +36,18 @@ public final class ChatMessage {
     private final long replyToMessageId;
     private final String replyPreview;
     private final String reaction;
+    private final String speakerName;
 
     public ChatMessage(long id, Role role, String content, long createdAt) {
         this(id, role, Kind.TEXT, "", content, createdAt);
+    }
+
+    /** 群聊便捷构造：带发言者名。 */
+    public ChatMessage(long id, Role role, String content, long createdAt, String speakerName) {
+        this(
+                id, role, Kind.TEXT, "", content, createdAt,
+                "", "", ActionState.NONE, "", "", -1, "", "", speakerName
+        );
     }
 
     public ChatMessage(
@@ -125,6 +134,42 @@ public final class ChatMessage {
             String replyPreview,
             String reaction
     ) {
+        this(
+                id,
+                role,
+                kind,
+                title,
+                content,
+                createdAt,
+                actionToken,
+                actionType,
+                actionState,
+                attachmentPath,
+                attachmentMimeType,
+                replyToMessageId,
+                replyPreview,
+                reaction,
+                ""
+        );
+    }
+
+    public ChatMessage(
+            long id,
+            Role role,
+            Kind kind,
+            String title,
+            String content,
+            long createdAt,
+            String actionToken,
+            String actionType,
+            ActionState actionState,
+            String attachmentPath,
+            String attachmentMimeType,
+            long replyToMessageId,
+            String replyPreview,
+            String reaction,
+            String speakerName
+    ) {
         this.id = id;
         this.role = role;
         this.kind = kind;
@@ -139,6 +184,7 @@ public final class ChatMessage {
         this.replyToMessageId = replyToMessageId;
         this.replyPreview = replyPreview;
         this.reaction = reaction;
+        this.speakerName = speakerName == null ? "" : speakerName;
     }
 
     public long getId() {
@@ -195,6 +241,11 @@ public final class ChatMessage {
 
     public String getReaction() {
         return reaction;
+    }
+
+    /** 群聊中标记这条 assistant 消息是哪个角色说的（单聊为空）。 */
+    public String getSpeakerName() {
+        return speakerName;
     }
 
     public boolean hasImageAttachment() {

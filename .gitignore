@@ -15,3 +15,7 @@ keystore.properties
 /device-artifacts/
 /lint-results/
 /docs/CLAUDE_REVIEW_PROMPT.md
+/.ai-review/
+/_verify/
+/docs/AUDIT_REPORT_*.md
+/docs/gap-analysis-*.md

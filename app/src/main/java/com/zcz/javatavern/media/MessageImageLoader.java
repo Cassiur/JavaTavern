@@ -6,13 +6,12 @@ import android.os.Handler;
 import android.os.Looper;
 import android.util.LruCache;
 
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import com.zcz.javatavern.util.AppExecutors;
+
 import java.util.function.Consumer;
 
 public final class MessageImageLoader implements AutoCloseable {
     private static final int TARGET_EDGE_PX = 720;
-    private final ExecutorService executor = Executors.newFixedThreadPool(2);
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private final LruCache<String, Bitmap> cache;
 
@@ -32,7 +31,7 @@ public final class MessageImageLoader implements AutoCloseable {
             callback.accept(cached);
             return;
         }
-        executor.execute(() -> {
+        AppExecutors.get().image().execute(() -> {
             Bitmap bitmap = decodeSampled(path);
             if (bitmap != null) {
                 cache.put(path, bitmap);
@@ -60,7 +59,6 @@ public final class MessageImageLoader implements AutoCloseable {
 
     @Override
     public void close() {
-        executor.shutdownNow();
         mainHandler.removeCallbacksAndMessages(null);
         cache.evictAll();
     }

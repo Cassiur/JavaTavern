@@ -121,6 +121,45 @@ public final class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.Me
         notifyItemChanged(lastIndex);
     }
 
+    /**
+     * Upserts a transient stream row identified by {@code streamOpId}.
+     *
+     * <p>Finds the first assistant TEXT message whose {@code createdAt} matches
+     * {@code createdAt} and whose id is negative (not yet persisted), then
+     * updates its content. If no such row exists (e.g. first render after
+     * rotation and history reload), appends a new transient row.
+     *
+     * <p>A stable identity avoids overwriting a persisted user message when
+     * history reloads without the transient stream row.
+     *
+     * @param streamOpId  operation identity (unused for lookup; reserved for
+     *                    future multi-stream support and test assertions)
+     * @param text        current stream text to display
+     * @param createdAt   timestamp used as the stable row identity
+     */
+    public void upsertStreamRow(long streamOpId, String text, long createdAt) {
+        for (int index = messages.size() - 1; index >= 0; index--) {
+            ChatMessage msg = messages.get(index);
+            if (msg.getId() < 0
+                    && msg.getRole() == ChatMessage.Role.ASSISTANT
+                    && msg.getKind() == ChatMessage.Kind.TEXT
+                    && msg.getCreatedAt() == createdAt) {
+                messages.set(index, new ChatMessage(
+                        msg.getId(), msg.getRole(), msg.getKind(),
+                        msg.getTitle(), text, msg.getCreatedAt(),
+                        msg.getActionToken(), msg.getActionType(),
+                        msg.getActionState(), msg.getAttachmentPath(),
+                        msg.getAttachmentMimeType(), msg.getReplyToMessageId(),
+                        msg.getReplyPreview(), msg.getReaction()
+                ));
+                notifyItemChanged(index);
+                return;
+            }
+        }
+        // No matching transient row — add one (covers first render after rotation).
+        add(new ChatMessage(-1, ChatMessage.Role.ASSISTANT, text, createdAt));
+    }
+
     public void updateActionState(String actionToken, ChatMessage.ActionState actionState) {
         for (int index = 0; index < messages.size(); index++) {
             ChatMessage message = messages.get(index);
@@ -254,12 +293,22 @@ public final class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.Me
             messageActionListener.onMessageLongPressed(message);
             return true;
         });
+        // Discoverability: a single tap opens the same action menu as long-press.
+        // Message actions (copy/reply/regenerate/react/edit/delete) are otherwise
+        // invisible to users who never discover the long-press gesture.
+        holder.itemView.setOnClickListener(view ->
+                messageActionListener.onMessageLongPressed(message)
+        );
         holder.cardActions.setVisibility(View.GONE);
         bindImage(holder, message);
         holder.replyPreview.setText(message.getReplyPreview());
         holder.replyPreview.setVisibility(message.hasReply() ? View.VISIBLE : View.GONE);
         holder.content.setText(message.getContent());
         holder.content.setVisibility(message.getContent().isEmpty() ? View.GONE : View.VISIBLE);
+        String speakerName = message.getSpeakerName();
+        holder.speaker.setText(speakerName);
+        holder.speaker.setVisibility(
+                !isUser && !speakerName.isEmpty() ? View.VISIBLE : View.GONE);
         holder.reaction.setText(message.getReaction());
         holder.reaction.setVisibility(message.hasReaction() ? View.VISIBLE : View.GONE);
         holder.bubble.setBackgroundResource(
@@ -267,11 +316,11 @@ public final class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.Me
         );
         holder.content.setTextColor(ContextCompat.getColor(
                 holder.itemView.getContext(),
-                isUser ? android.R.color.white : R.color.text_primary
+                isUser ? R.color.on_primary : R.color.text_primary
         ));
         holder.replyPreview.setTextColor(ContextCompat.getColor(
                 holder.itemView.getContext(),
-                isUser ? android.R.color.white : R.color.text_secondary
+                isUser ? R.color.on_primary : R.color.text_secondary
         ));
     }
 
@@ -326,7 +375,8 @@ public final class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.Me
                 message.getAttachmentMimeType(),
                 message.getReplyToMessageId(),
                 message.getReplyPreview(),
-                message.getReaction()
+                message.getReaction(),
+                message.getSpeakerName()
         );
     }
 
@@ -335,6 +385,7 @@ public final class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.Me
         private final TextView content;
         private final TextView replyPreview;
         private final TextView reaction;
+        private final TextView speaker;
         private final View bubble;
         private final ImageView image;
         private final View card;
@@ -352,6 +403,7 @@ public final class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.Me
             content = itemView.findViewById(R.id.messageContent);
             replyPreview = itemView.findViewById(R.id.messageReplyPreview);
             reaction = itemView.findViewById(R.id.messageReaction);
+            speaker = itemView.findViewById(R.id.messageSpeaker);
             bubble = itemView.findViewById(R.id.messageBubble);
             image = itemView.findViewById(R.id.messageImage);
             card = itemView.findViewById(R.id.agentCard);

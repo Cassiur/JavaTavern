@@ -4,7 +4,6 @@ import android.content.ContentValues;
 import android.content.Context;
 import android.database.Cursor;
 import android.database.sqlite.SQLiteDatabase;
-import android.database.sqlite.SQLiteOpenHelper;
 import android.graphics.Color;
 
 import com.zcz.javatavern.model.CharacterCardData;
@@ -18,56 +17,23 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
-public final class CharacterRepository extends SQLiteOpenHelper {
-    private static final String DATABASE_NAME = "characters.db";
-    private static final int DATABASE_VERSION = 1;
-    private static final String TABLE_CHARACTERS = "characters";
-    private static final String TABLE_WORLD_ENTRIES = "world_entries";
+/**
+ * Repository for characters and their world-book entries.
+ *
+ * <p>Reads and writes through the shared {@link TavernDatabase} singleton.
+ */
+public final class CharacterRepository {
+    private final TavernDatabase database;
 
     public CharacterRepository(Context context) {
-        super(context, DATABASE_NAME, null, DATABASE_VERSION);
-    }
-
-    @Override
-    public void onCreate(SQLiteDatabase database) {
-        database.execSQL(
-                "CREATE TABLE " + TABLE_CHARACTERS + " (" +
-                        "id TEXT PRIMARY KEY," +
-                        "name TEXT NOT NULL," +
-                        "description TEXT NOT NULL," +
-                        "greeting TEXT NOT NULL," +
-                        "system_prompt TEXT NOT NULL," +
-                        "accent_color INTEGER NOT NULL," +
-                        "source_hash TEXT NOT NULL UNIQUE," +
-                        "created_at INTEGER NOT NULL)"
-        );
-        database.execSQL(
-                "CREATE TABLE " + TABLE_WORLD_ENTRIES + " (" +
-                        "id INTEGER PRIMARY KEY AUTOINCREMENT," +
-                        "character_id TEXT NOT NULL," +
-                        "keywords_json TEXT NOT NULL," +
-                        "content TEXT NOT NULL," +
-                        "enabled INTEGER NOT NULL," +
-                        "constant_entry INTEGER NOT NULL," +
-                        "position INTEGER NOT NULL," +
-                        "FOREIGN KEY(character_id) REFERENCES " + TABLE_CHARACTERS + "(id) ON DELETE CASCADE)"
-        );
-        database.execSQL(
-                "CREATE INDEX index_world_entries_character ON " +
-                        TABLE_WORLD_ENTRIES + "(character_id, position)"
-        );
-        seedBuiltIns(database);
-    }
-
-    @Override
-    public void onUpgrade(SQLiteDatabase database, int oldVersion, int newVersion) {
+        this.database = TavernDatabase.get(context);
     }
 
     public List<CharacterProfile> getCharacters() {
         List<CharacterProfile> characters = new ArrayList<>();
-        try (Cursor cursor = getReadableDatabase().query(
-                TABLE_CHARACTERS,
-                new String[]{"id", "name", "description", "greeting", "system_prompt", "accent_color"},
+        try (Cursor cursor = database.getReadableDatabase().query(
+                TavernDatabase.TABLE_CHARACTERS,
+                new String[]{"id", "name", "description", "greeting", "system_prompt", "accent_color", "avatar"},
                 null,
                 null,
                 null,
@@ -75,16 +41,17 @@ public final class CharacterRepository extends SQLiteOpenHelper {
                 "created_at ASC"
         )) {
             while (cursor.moveToNext()) {
-                characters.add(readCharacter(cursor, List.of()));
+                String characterId = cursor.getString(0);
+                characters.add(readCharacter(cursor, loadWorldEntries(characterId)));
             }
         }
         return characters;
     }
 
     public CharacterProfile findById(String id) {
-        try (Cursor cursor = getReadableDatabase().query(
-                TABLE_CHARACTERS,
-                new String[]{"id", "name", "description", "greeting", "system_prompt", "accent_color"},
+        try (Cursor cursor = database.getReadableDatabase().query(
+                TavernDatabase.TABLE_CHARACTERS,
+                new String[]{"id", "name", "description", "greeting", "system_prompt", "accent_color", "avatar"},
                 "id = ?",
                 new String[]{id},
                 null,
@@ -108,50 +75,46 @@ public final class CharacterRepository extends SQLiteOpenHelper {
     }
 
     public CharacterProfile importCard(CharacterCardData card) {
-        SQLiteDatabase database = getWritableDatabase();
-        database.beginTransaction();
+        SQLiteDatabase writable = database.getWritableDatabase();
+        writable.beginTransaction();
         try {
-            String existingId = findIdBySourceHash(database, card.getSourceHash());
+            String existingId = findIdBySourceHash(writable, card.getSourceHash());
             if (existingId != null) {
-                database.setTransactionSuccessful();
+                writable.setTransactionSuccessful();
                 return findById(existingId);
             }
 
             String characterId = "imported-" + UUID.randomUUID();
+            int accentColor = accentColorFor(card.getName());
             ContentValues characterValues = new ContentValues();
             characterValues.put("id", characterId);
             characterValues.put("name", card.getName());
             characterValues.put("description", card.getDescription());
             characterValues.put("greeting", card.getGreeting());
             characterValues.put("system_prompt", card.getSystemPrompt());
-            characterValues.put("accent_color", accentColorFor(card.getName()));
+            characterValues.put("accent_color", accentColor);
             characterValues.put("source_hash", card.getSourceHash());
+            characterValues.put("avatar", card.getAvatar() == null ? "" : card.getAvatar());
             characterValues.put("created_at", System.currentTimeMillis());
-            database.insertOrThrow(TABLE_CHARACTERS, null, characterValues);
+            writable.insertOrThrow(TavernDatabase.TABLE_CHARACTERS, null, characterValues);
 
-            int position = 0;
             for (WorldBookEntry entry : card.getWorldEntries()) {
-                ContentValues worldValues = new ContentValues();
-                worldValues.put("character_id", characterId);
-                worldValues.put("keywords_json", new JSONArray(entry.getKeywords()).toString());
-                worldValues.put("content", entry.getContent());
-                worldValues.put("enabled", entry.isEnabled() ? 1 : 0);
-                worldValues.put("constant_entry", entry.isConstant() ? 1 : 0);
-                worldValues.put("position", position++);
-                database.insertOrThrow(TABLE_WORLD_ENTRIES, null, worldValues);
+                writable.insertOrThrow(TavernDatabase.TABLE_WORLD_ENTRIES, null,
+                        worldEntryValues(characterId, entry));
             }
-            database.setTransactionSuccessful();
+            writable.setTransactionSuccessful();
             return new CharacterProfile(
                     characterId,
                     card.getName(),
                     card.getDescription(),
                     card.getGreeting(),
-                    accentColorFor(card.getName()),
+                    accentColor,
                     card.getSystemPrompt(),
+                    card.getAvatar() == null ? "" : card.getAvatar(),
                     card.getWorldEntries()
             );
         } finally {
-            database.endTransaction();
+            writable.endTransaction();
         }
     }
 
@@ -171,8 +134,9 @@ public final class CharacterRepository extends SQLiteOpenHelper {
         values.put("system_prompt", systemPrompt);
         values.put("accent_color", accentColor);
         values.put("source_hash", characterId);
+        values.put("avatar", "");
         values.put("created_at", System.currentTimeMillis());
-        getWritableDatabase().insertOrThrow(TABLE_CHARACTERS, null, values);
+        database.getWritableDatabase().insertOrThrow(TavernDatabase.TABLE_CHARACTERS, null, values);
         return new CharacterProfile(
                 characterId,
                 name,
@@ -180,6 +144,7 @@ public final class CharacterRepository extends SQLiteOpenHelper {
                 greeting,
                 accentColor,
                 systemPrompt,
+                "",
                 List.of()
         );
     }
@@ -198,8 +163,8 @@ public final class CharacterRepository extends SQLiteOpenHelper {
         values.put("greeting", greeting);
         values.put("system_prompt", systemPrompt);
         values.put("accent_color", accentColor);
-        int updatedRows = getWritableDatabase().update(
-                TABLE_CHARACTERS,
+        int updatedRows = database.getWritableDatabase().update(
+                TavernDatabase.TABLE_CHARACTERS,
                 values,
                 "id = ?",
                 new String[]{characterId}
@@ -218,31 +183,88 @@ public final class CharacterRepository extends SQLiteOpenHelper {
                 cursor.getString(3),
                 cursor.getInt(5),
                 cursor.getString(4),
+                cursor.getString(6),
                 worldEntries
         );
     }
 
     private List<WorldBookEntry> loadWorldEntries(String characterId) {
         List<WorldBookEntry> entries = new ArrayList<>();
-        try (Cursor cursor = getReadableDatabase().query(
-                TABLE_WORLD_ENTRIES,
-                new String[]{"keywords_json", "content", "enabled", "constant_entry"},
+        try (Cursor cursor = database.getReadableDatabase().query(
+                TavernDatabase.TABLE_WORLD_ENTRIES,
+                new String[]{
+                        "id", "keywords_json", "content", "enabled", "constant_entry",
+                        "position", "sort_order", "priority", "depth", "probability",
+                        "exclude_recursion", "prevent_recursion"
+                },
                 "character_id = ?",
                 new String[]{characterId},
                 null,
                 null,
-                "position ASC"
+                "position ASC, sort_order ASC, priority DESC"
         )) {
             while (cursor.moveToNext()) {
                 entries.add(new WorldBookEntry(
-                        parseKeywords(cursor.getString(0)),
-                        cursor.getString(1),
-                        cursor.getInt(2) == 1,
-                        cursor.getInt(3) == 1
+                        cursor.getLong(0),
+                        parseKeywords(cursor.getString(1)),
+                        cursor.getString(2),
+                        cursor.getInt(3) == 1,
+                        cursor.getInt(4) == 1,
+                        cursor.getInt(5),
+                        cursor.getInt(6),
+                        cursor.getInt(7),
+                        cursor.getInt(8),
+                        cursor.getInt(9),
+                        cursor.getInt(10) == 1,
+                        cursor.getInt(11) == 1
                 ));
             }
         }
         return entries;
+    }
+
+    public void addWorldEntry(String characterId, WorldBookEntry entry) {
+        database.getWritableDatabase().insertOrThrow(
+                TavernDatabase.TABLE_WORLD_ENTRIES, null,
+                worldEntryValues(characterId, entry));
+    }
+
+    public void updateWorldEntry(long entryId, WorldBookEntry entry) {
+        int updated = database.getWritableDatabase().update(
+                TavernDatabase.TABLE_WORLD_ENTRIES,
+                worldEntryValues(null, entry),
+                "id = ?",
+                new String[]{String.valueOf(entryId)}
+        );
+        if (updated != 1) {
+            throw new IllegalArgumentException("世界书条目不存在");
+        }
+    }
+
+    public void deleteWorldEntry(long entryId) {
+        database.getWritableDatabase().delete(
+                TavernDatabase.TABLE_WORLD_ENTRIES, "id = ?",
+                new String[]{String.valueOf(entryId)}
+        );
+    }
+
+    private ContentValues worldEntryValues(String characterId, WorldBookEntry entry) {
+        ContentValues values = new ContentValues();
+        if (characterId != null) {
+            values.put("character_id", characterId);
+        }
+        values.put("keywords_json", new JSONArray(entry.getKeywords()).toString());
+        values.put("content", entry.getContent());
+        values.put("enabled", entry.isEnabled() ? 1 : 0);
+        values.put("constant_entry", entry.isConstant() ? 1 : 0);
+        values.put("position", entry.getPosition());
+        values.put("sort_order", entry.getOrder());
+        values.put("priority", entry.getPriority());
+        values.put("depth", entry.getDepth());
+        values.put("probability", entry.getProbability());
+        values.put("exclude_recursion", entry.isExcludeRecursion() ? 1 : 0);
+        values.put("prevent_recursion", entry.isPreventRecursion() ? 1 : 0);
+        return values;
     }
 
     private List<String> parseKeywords(String json) {
@@ -260,9 +282,9 @@ public final class CharacterRepository extends SQLiteOpenHelper {
         return keywords;
     }
 
-    private String findIdBySourceHash(SQLiteDatabase database, String sourceHash) {
-        try (Cursor cursor = database.query(
-                TABLE_CHARACTERS,
+    private String findIdBySourceHash(SQLiteDatabase writable, String sourceHash) {
+        try (Cursor cursor = writable.query(
+                TavernDatabase.TABLE_CHARACTERS,
                 new String[]{"id"},
                 "source_hash = ?",
                 new String[]{sourceHash},
@@ -275,58 +297,15 @@ public final class CharacterRepository extends SQLiteOpenHelper {
         }
     }
 
-    private void seedBuiltIns(SQLiteDatabase database) {
-        insertBuiltIn(
-                database,
-                "librarian",
-                "雨巷馆长",
-                "安静、克制，擅长把混乱的想法整理成清晰计划。",
-                "欢迎回来。先坐下，告诉我今天最想解决的一件事。",
-                Color.rgb(92, 76, 153)
-        );
-        insertBuiltIn(
-                database,
-                "detective",
-                "南城侦探",
-                "善于追问事实，从细节中寻找被忽略的线索。",
-                "案卷已经摊开了。你想从哪条线索开始？",
-                Color.rgb(47, 93, 98)
-        );
-        insertBuiltIn(
-                database,
-                "coach",
-                "灰塔教练",
-                "不说空话，用可验证的小目标帮助你恢复行动。",
-                "不用证明过去。说说你下一步准备交付什么。",
-                Color.rgb(150, 86, 52)
-        );
-    }
-
-    private void insertBuiltIn(
-            SQLiteDatabase database,
-            String id,
-            String name,
-            String description,
-            String greeting,
-            int accentColor
-    ) {
-        ContentValues values = new ContentValues();
-        values.put("id", id);
-        values.put("name", name);
-        values.put("description", description);
-        values.put("greeting", greeting);
-        values.put("system_prompt", description);
-        values.put("accent_color", accentColor);
-        values.put("source_hash", "builtin:" + id);
-        values.put("created_at", 0);
-        database.insertOrThrow(TABLE_CHARACTERS, null, values);
-    }
-
     private int accentColorFor(String name) {
         int hash = name.hashCode();
         int red = 72 + Math.floorMod(hash, 112);
         int green = 72 + Math.floorMod(hash >> 8, 112);
         int blue = 72 + Math.floorMod(hash >> 16, 112);
         return Color.rgb(red, green, blue);
+    }
+
+    /** No-op — the shared database is process-scoped and must not be closed. */
+    public void close() {
     }
 }

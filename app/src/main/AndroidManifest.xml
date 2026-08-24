@@ -20,6 +20,18 @@
             android:name=".CharacterEditorActivity"
             android:exported="false" />
         <activity
+            android:name=".WorldBookEditorActivity"
+            android:exported="false" />
+        <activity
+            android:name=".GroupEditorActivity"
+            android:exported="false" />
+        <activity
+            android:name=".GroupChatActivity"
+            android:exported="false" />
+        <activity
+            android:name=".GroupListActivity"
+            android:exported="false" />
+        <activity
             android:name=".SettingsActivity"
             android:exported="false" />
         <activity

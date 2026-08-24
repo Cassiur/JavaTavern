@@ -20,6 +20,11 @@ public final class SecureModelSettingsStore {
     private static final String KEY_MODEL = "model";
     private static final String KEY_API_KEY = "encrypted_api_key";
     private static final String KEY_PROVIDER_ID = "provider_id";
+    private static final String KEY_TEMPERATURE = "gen_temperature";
+    private static final String KEY_TOP_P = "gen_top_p";
+    private static final String KEY_MAX_TOKENS = "gen_max_tokens";
+    private static final String KEY_FREQUENCY_PENALTY = "gen_frequency_penalty";
+    private static final String KEY_PRESENCE_PENALTY = "gen_presence_penalty";
     private static final String KEYSTORE_PROVIDER = "AndroidKeyStore";
     private static final String KEY_ALIAS = "java_tavern_model_key";
     private static final String TRANSFORMATION = "AES/GCM/NoPadding";
@@ -35,17 +40,77 @@ public final class SecureModelSettingsStore {
                 preferences.getString(KEY_PROVIDER_ID, ProviderCatalog.CUSTOM_ID),
                 preferences.getString(KEY_BASE_URL, "https://api.openai.com/v1"),
                 preferences.getString(KEY_MODEL, ""),
-                decrypt(preferences.getString(KEY_API_KEY, ""))
+                decrypt(preferences.getString(KEY_API_KEY, "")),
+                loadGenerationParams()
         );
     }
 
+    private GenerationParams loadGenerationParams() {
+        return new GenerationParams(
+                readDouble(KEY_TEMPERATURE),
+                readDouble(KEY_TOP_P),
+                readInt(KEY_MAX_TOKENS),
+                readDouble(KEY_FREQUENCY_PENALTY),
+                readDouble(KEY_PRESENCE_PENALTY)
+        );
+    }
+
+    /**
+     * 采样参数用字符串存储（SharedPreferences 无 double 类型），
+     * 避免 float 存储 0.7 时退化成 0.699999988079071 的精度污染。
+     */
+    private Double readDouble(String key) {
+        if (!preferences.contains(key)) {
+            return null;
+        }
+        try {
+            return Double.parseDouble(preferences.getString(key, ""));
+        } catch (NumberFormatException | ClassCastException exception) {
+            // NumberFormatException：存储值不是合法数字；ClassCastException：旧版本按 float 存储。
+            return null;
+        }
+    }
+
+    private Integer readInt(String key) {
+        if (!preferences.contains(key)) {
+            return null;
+        }
+        try {
+            return preferences.getInt(key, 0);
+        } catch (ClassCastException exception) {
+            return null;
+        }
+    }
+
     public void save(ModelSettings settings) {
-        preferences.edit()
+        GenerationParams params = settings.getGenerationParams();
+        SharedPreferences.Editor editor = preferences.edit()
                 .putString(KEY_PROVIDER_ID, settings.getProviderId())
                 .putString(KEY_BASE_URL, settings.getBaseUrl())
                 .putString(KEY_MODEL, settings.getModel())
-                .putString(KEY_API_KEY, encrypt(settings.getApiKey()))
-                .apply();
+                .putString(KEY_API_KEY, encrypt(settings.getApiKey()));
+        writeNullableDouble(editor, KEY_TEMPERATURE, params.getTemperature());
+        writeNullableDouble(editor, KEY_TOP_P, params.getTopP());
+        writeNullableInt(editor, KEY_MAX_TOKENS, params.getMaxTokens());
+        writeNullableDouble(editor, KEY_FREQUENCY_PENALTY, params.getFrequencyPenalty());
+        writeNullableDouble(editor, KEY_PRESENCE_PENALTY, params.getPresencePenalty());
+        editor.apply();
+    }
+
+    private void writeNullableDouble(SharedPreferences.Editor editor, String key, Double value) {
+        if (value == null) {
+            editor.remove(key);
+        } else {
+            editor.putString(key, Double.toString(value));
+        }
+    }
+
+    private void writeNullableInt(SharedPreferences.Editor editor, String key, Integer value) {
+        if (value == null) {
+            editor.remove(key);
+        } else {
+            editor.putInt(key, value);
+        }
     }
 
     private String encrypt(String value) {

@@ -3,7 +3,6 @@
 ## 基本信息
 
 - 上游：`https://github.com/dghiffjd7/AiChat`
-- 本地只读参考：`D:\study\references\AiChat`
 - 审查提交：`e5fed66`
 - 技术栈：Tauri v2、JavaScript、Rust，Android 由 Tauri 生成工程承载。
 - 许可证：AGPL-3.0。

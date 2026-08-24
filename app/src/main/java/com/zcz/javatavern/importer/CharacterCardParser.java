@@ -82,10 +82,52 @@ public final class CharacterCardParser {
                     parseKeywords(rawEntry.opt("keys")),
                     content,
                     rawEntry.optBoolean("enabled", true),
-                    rawEntry.optBoolean("constant", false)
+                    rawEntry.optBoolean("constant", false),
+                    resolvePosition(rawEntry.opt("position")),
+                    optInt(rawEntry, WorldBookEntry.DEFAULT_ORDER,
+                            "insertion_order", "insert_order", "order"),
+                    optInt(rawEntry, 0, "priority"),
+                    optInt(rawEntry, WorldBookEntry.DEFAULT_DEPTH, "depth"),
+                    optInt(rawEntry, WorldBookEntry.DEFAULT_PROBABILITY, "probability"),
+                    rawEntry.optBoolean("exclude_recursion", false),
+                    rawEntry.optBoolean("prevent_recursion", false)
             ));
         }
         return entries;
+    }
+
+    /**
+     * SillyTavern position 取值：数字 0=before_char / 1=after_char，V3 亦可用
+     * 字符串 "before_char"/"after_char"。其余（@D 深度注入等）本轮归入 after_char。
+     */
+    private int resolvePosition(Object raw) {
+        if (raw instanceof String stringPosition) {
+            return "before_char".equals(stringPosition)
+                    ? WorldBookEntry.POSITION_BEFORE_CHAR
+                    : WorldBookEntry.POSITION_AFTER_CHAR;
+        }
+        if (raw instanceof Number numberPosition) {
+            return numberPosition.intValue() == WorldBookEntry.POSITION_BEFORE_CHAR
+                    ? WorldBookEntry.POSITION_BEFORE_CHAR
+                    : WorldBookEntry.POSITION_AFTER_CHAR;
+        }
+        return WorldBookEntry.POSITION_BEFORE_CHAR;
+    }
+
+    private int optInt(JSONObject object, int defaultValue, String... keys) {
+        for (String key : keys) {
+            Object value = object.opt(key);
+            if (value instanceof Number number) {
+                return number.intValue();
+            }
+            if (value instanceof String string && !string.trim().isEmpty()) {
+                try {
+                    return Integer.parseInt(string.trim());
+                } catch (NumberFormatException ignored) {
+                }
+            }
+        }
+        return defaultValue;
     }
 
     private List<String> parseKeywords(Object rawKeys) {

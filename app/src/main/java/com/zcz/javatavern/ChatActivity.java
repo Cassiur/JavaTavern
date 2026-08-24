@@ -1,8 +1,5 @@
 package com.zcz.javatavern;
 
-import android.content.ClipData;
-import android.content.ClipboardManager;
-import android.content.Context;
 import android.content.Intent;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
@@ -22,42 +19,41 @@ import android.widget.Toast;
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.PickVisualMediaRequest;
 import androidx.activity.result.contract.ActivityResultContracts;
-import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.lifecycle.ViewModelProvider;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
 import com.google.android.material.button.MaterialButton;
-import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 import com.zcz.javatavern.agent.LocalAgentRouter;
 import com.zcz.javatavern.data.ChatRepository;
 import com.zcz.javatavern.data.ConversationDraftStore;
 import com.zcz.javatavern.data.ModelSettings;
 import com.zcz.javatavern.data.SecureModelSettingsStore;
+import com.zcz.javatavern.media.ImageAttachmentStore;
 import com.zcz.javatavern.model.AgentCard;
 import com.zcz.javatavern.model.CharacterProfile;
 import com.zcz.javatavern.model.ChatMessage;
-import com.zcz.javatavern.media.ImageAttachmentStore;
-import com.zcz.javatavern.network.OpenAiCompatibleClient;
 import com.zcz.javatavern.service.MockReplyEngine;
 import com.zcz.javatavern.service.ReplyEngine;
+import com.zcz.javatavern.stream.StreamAccumulator;
+import com.zcz.javatavern.ui.ChatAgentController;
+import com.zcz.javatavern.ui.ChatMessageActionsController;
+import com.zcz.javatavern.ui.ChatSearchController;
 import com.zcz.javatavern.ui.MessageAdapter;
+import com.zcz.javatavern.util.AppExecutors;
 
 import java.util.List;
-import java.util.ArrayList;
-import java.util.UUID;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 
 public final class ChatActivity extends AppCompatActivity {
     private static final int INITIAL_PAGE_SIZE = 60;
     private static final int OLDER_PAGE_SIZE = 40;
-    private final ExecutorService databaseExecutor = Executors.newSingleThreadExecutor();
-    private final ExecutorService imageExecutor = Executors.newSingleThreadExecutor();
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private final ReplyEngine replyEngine = new MockReplyEngine();
     private final LocalAgentRouter agentRouter = new LocalAgentRouter();
-    private final OpenAiCompatibleClient modelClient = new OpenAiCompatibleClient();
+
+    // Stream lifecycle is owned by the ViewModel — do NOT keep modelClient here.
+    private ChatViewModel chatViewModel;
 
     private CharacterProfile character;
     private String characterId = "";
@@ -81,21 +77,24 @@ public final class ChatActivity extends AppCompatActivity {
     private String pendingAttachmentMimeType = "";
     private boolean loadingOlderMessages;
     private boolean hasMoreHistory = true;
-    private OpenAiCompatibleClient.StreamCall activeStream;
-    private StringBuilder streamingText;
-    private final StringBuilder pendingStreamDeltas = new StringBuilder();
-    private final Object streamBufferLock = new Object();
-    private final Runnable streamRenderRunnable = this::flushStreamDeltas;
-    private boolean streamRenderScheduled;
-    private long streamingCreatedAt;
+    // Stream snapshots are reconciled only after persisted history is loaded.
+    private boolean historyLoaded;
     private final Runnable persistDraftRunnable = this::persistDraft;
     private boolean restoringDraft;
+    private View offlineBanner;
+    private MaterialButton offlineBannerAction;
+
+    // Focused collaborators keep search, agent actions, and message actions separate.
+    private ChatSearchController searchController;
+    private ChatAgentController agentController;
+    private ChatMessageActionsController messageActionsController;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_chat);
 
+        chatViewModel = new ViewModelProvider(this).get(ChatViewModel.class);
         String requestedCharacterId = getIntent().getStringExtra(MainActivity.EXTRA_CHARACTER_ID);
         chatRepository = new ChatRepository(getApplicationContext());
         draftStore = new ConversationDraftStore(getApplicationContext());
@@ -106,20 +105,112 @@ public final class ChatActivity extends AppCompatActivity {
         title.setText(R.string.loading_character);
         findViewById(R.id.backButton).setOnClickListener(view -> finish());
 
-        messageAdapter = new MessageAdapter(new MessageAdapter.AgentActionListener() {
-            @Override
-            public void onConfirm(ChatMessage message) {
-                confirmAgentAction(message);
-            }
-
-            @Override
-            public void onCancel(ChatMessage message) {
-                cancelAgentAction(message);
-            }
-        }, this::showMessageActions);
         messageList = findViewById(R.id.messageList);
         messageLayoutManager = new LinearLayoutManager(this);
         messageLayoutManager.setStackFromEnd(true);
+
+        // The adapter's listeners forward to the collaborators below; the lambda
+        // bodies resolve the fields lazily (they are non-null by first click).
+        messageAdapter = new MessageAdapter(
+                new MessageAdapter.AgentActionListener() {
+                    @Override
+                    public void onConfirm(ChatMessage message) {
+                        agentController.confirm(message);
+                    }
+
+                    @Override
+                    public void onCancel(ChatMessage message) {
+                        agentController.cancel(message);
+                    }
+                },
+                message -> messageActionsController.showActions(message)
+        );
+
+        searchController = new ChatSearchController(
+                this,
+                chatRepository,
+                messageAdapter,
+                messageLayoutManager,
+                messageList,
+                new ChatSearchController.Listener() {
+                    @Override
+                    public boolean isHostActive() {
+                        return isHostActive();
+                    }
+
+                    @Override
+                    public void onSearchContextOpened(boolean more) {
+                        hasMoreHistory = more;
+                    }
+                },
+                () -> characterId,
+                () -> character == null ? "" : character.getName()
+        );
+        agentController = new ChatAgentController(
+                this,
+                chatRepository,
+                messageAdapter,
+                imageAttachmentStore,
+                new ChatAgentController.Listener() {
+                    @Override
+                    public boolean isHostActive() {
+                        return isHostActive();
+                    }
+
+                    @Override
+                    public void scrollToLatest() {
+                        ChatActivity.this.scrollToLatest();
+                    }
+                },
+                () -> characterId
+        );
+        messageActionsController = new ChatMessageActionsController(
+                this,
+                chatRepository,
+                messageAdapter,
+                settingsStore,
+                new ChatMessageActionsController.Listener() {
+                    @Override
+                    public boolean isHostActive() {
+                        return isHostActive();
+                    }
+
+                    @Override
+                    public boolean isStreaming() {
+                        return chatViewModel.isStreaming();
+                    }
+
+                    @Override
+                    public void onBeginReply(ChatMessage message) {
+                        beginReply(message);
+                    }
+
+                    @Override
+                    public void onRegenerate(ModelSettings settings) {
+                        startStreaming(settings);
+                    }
+
+                    @Override
+                    public void onMockReply(String input) {
+                        addMockReply(input);
+                    }
+
+                    @Override
+                    public void onClearPendingReplyIfMatches(long messageId) {
+                        if (pendingReplyMessage != null && pendingReplyMessage.getId() == messageId) {
+                            clearPendingReply();
+                        }
+                    }
+
+                    @Override
+                    public void onDeleteImageAttachment(String path) {
+                        imageAttachmentStore.delete(path);
+                    }
+                },
+                () -> characterId,
+                () -> character == null ? "" : character.getName()
+        );
+
         messageList.setLayoutManager(messageLayoutManager);
         messageList.setAdapter(messageAdapter);
         messageList.addOnScrollListener(new RecyclerView.OnScrollListener() {
@@ -134,6 +225,11 @@ public final class ChatActivity extends AppCompatActivity {
         messageInput = findViewById(R.id.messageInput);
         sendButton = findViewById(R.id.sendButton);
         attachImageButton = findViewById(R.id.attachImageButton);
+        offlineBanner = findViewById(R.id.offlineBanner);
+        offlineBannerAction = findViewById(R.id.offlineBannerAction);
+        offlineBannerAction.setOnClickListener(view ->
+                startActivity(new Intent(this, SettingsActivity.class))
+        );
         attachmentPreview = findViewById(R.id.attachmentPreview);
         attachmentPreviewImage = findViewById(R.id.attachmentPreviewImage);
         replyPreview = findViewById(R.id.replyPreview);
@@ -154,7 +250,7 @@ public final class ChatActivity extends AppCompatActivity {
                 clearPendingAttachment(true)
         );
         findViewById(R.id.removeReplyButton).setOnClickListener(view -> clearPendingReply());
-        findViewById(R.id.searchMessagesButton).setOnClickListener(view -> showSearchDialog());
+        findViewById(R.id.searchMessagesButton).setOnClickListener(view -> searchController.showSearchDialog());
         findViewById(R.id.memoryButton).setOnClickListener(view -> openMemory());
         sendButton.setOnClickListener(view -> handlePrimaryAction());
         messageInput.setOnEditorActionListener((view, actionId, event) -> {
@@ -183,11 +279,83 @@ public final class ChatActivity extends AppCompatActivity {
             }
         });
 
+        // Observe stream state from ViewModel — survives rotation.
+        chatViewModel.getStreamState().observe(this, this::applyStreamSnapshot);
+
         loadHistory(requestedCharacterId == null ? "" : requestedCharacterId, title);
     }
 
+    private boolean isHostActive() {
+        return !isFinishing() && !isDestroyed();
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        // Offline demo banner: only visible when no remote model is configured.
+        // Refreshes on resume so returning from Settings hides it immediately.
+        ModelSettings settings = settingsStore.load();
+        boolean offline = !settings.isRemoteConfigured();
+        if (offlineBanner != null) {
+            offlineBanner.setVisibility(offline ? View.VISIBLE : View.GONE);
+        }
+    }
+
+    /**
+     * Renders a StreamSnapshot emitted by the ViewModel.
+     *
+     * Rendering waits for persisted history, uses a stable transient-row
+     * identity, and immediately reflects terminal display text.
+     */
+    private void applyStreamSnapshot(ChatViewModel.StreamSnapshot snapshot) {
+        if (snapshot == null) {
+            setStreamingUi(false);
+            return;
+        }
+        StreamAccumulator.State s = snapshot.accState;
+        switch (s.status) {
+            case CONNECTING:
+                if (historyLoaded) {
+                    messageAdapter.upsertStreamRow(s.operationId,
+                            getString(R.string.stream_connecting), s.createdAt);
+                    if (isNearBottom()) scrollToLatest();
+                }
+                setStreamingUi(true);
+                break;
+            case STREAMING:
+                if (historyLoaded) {
+                    messageAdapter.upsertStreamRow(s.operationId,
+                            snapshot.displayText, s.createdAt);
+                    if (isNearBottom()) scrollToLatest();
+                }
+                setStreamingUi(true);
+                break;
+            case COMPLETED:
+            case STOPPED:
+                if (historyLoaded) {
+                    messageAdapter.upsertStreamRow(s.operationId,
+                            snapshot.displayText, s.createdAt);
+                    if (snapshot.rowId > 0) {
+                        messageAdapter.assignPersistedId(
+                                s.createdAt, ChatMessage.Role.ASSISTANT, snapshot.rowId);
+                    }
+                    scrollToLatest();
+                }
+                setStreamingUi(false);
+                break;
+            case ERROR:
+                if (historyLoaded) {
+                    messageAdapter.upsertStreamRow(s.operationId,
+                            snapshot.displayText, s.createdAt);
+                    scrollToLatest();
+                }
+                setStreamingUi(false);
+                break;
+        }
+    }
+
     private void loadHistory(String requestedCharacterId, TextView title) {
-        databaseExecutor.execute(() -> {
+        AppExecutors.get().diskIo().execute(() -> {
             ChatRepository.SessionData session = chatRepository.loadSession(
                     requestedCharacterId,
                     INITIAL_PAGE_SIZE
@@ -195,7 +363,7 @@ public final class ChatActivity extends AppCompatActivity {
             CharacterProfile resultCharacter = session.getCharacter();
             List<ChatMessage> messages = session.getMessages();
             mainHandler.post(() -> {
-                if (isFinishing() || isDestroyed()) {
+                if (!isHostActive()) {
                     return;
                 }
                 character = resultCharacter;
@@ -203,6 +371,12 @@ public final class ChatActivity extends AppCompatActivity {
                 hasMoreHistory = session.hasMoreHistory();
                 title.setText(character.getName());
                 messageAdapter.replaceAll(messages);
+                historyLoaded = true;
+                ChatViewModel.StreamSnapshot retained =
+                        chatViewModel.getStreamState().getValue();
+                if (retained != null) {
+                    applyStreamSnapshot(retained);
+                }
                 String draft = draftStore.load(characterId);
                 restoringDraft = true;
                 messageInput.setText(draft);
@@ -210,7 +384,7 @@ public final class ChatActivity extends AppCompatActivity {
                 restoringDraft = false;
                 messageInput.setEnabled(true);
                 sendButton.setEnabled(true);
-                attachImageButton.setEnabled(true);
+                attachImageButton.setEnabled(!chatViewModel.isStreaming());
                 scrollToLatest();
             });
         });
@@ -229,7 +403,7 @@ public final class ChatActivity extends AppCompatActivity {
         View anchorView = messageLayoutManager.findViewByPosition(anchorPosition);
         int anchorOffset = anchorView == null ? 0 : anchorView.getTop() - messageList.getPaddingTop();
         loadingOlderMessages = true;
-        databaseExecutor.execute(() -> {
+        AppExecutors.get().diskIo().execute(() -> {
             List<ChatMessage> olderMessages = chatRepository.loadMessagesBefore(
                     characterId,
                     beforeId,
@@ -237,7 +411,7 @@ public final class ChatActivity extends AppCompatActivity {
             );
             mainHandler.post(() -> {
                 loadingOlderMessages = false;
-                if (isFinishing() || isDestroyed()) {
+                if (!isHostActive()) {
                     return;
                 }
                 hasMoreHistory = olderMessages.size() >= OLDER_PAGE_SIZE;
@@ -252,23 +426,6 @@ public final class ChatActivity extends AppCompatActivity {
         });
     }
 
-    private void showSearchDialog() {
-        if (characterId.isEmpty()) {
-            return;
-        }
-        EditText searchInput = new EditText(this);
-        searchInput.setHint(R.string.search_hint);
-        searchInput.setSingleLine(true);
-        new MaterialAlertDialogBuilder(this)
-                .setTitle(R.string.search_messages)
-                .setView(searchInput)
-                .setNegativeButton(R.string.cancel, null)
-                .setPositiveButton(R.string.search, (dialog, which) ->
-                        searchMessages(searchInput.getText().toString())
-                )
-                .show();
-    }
-
     private void openMemory() {
         if (character == null) {
             return;
@@ -278,71 +435,9 @@ public final class ChatActivity extends AppCompatActivity {
                 .putExtra(MemoryActivity.EXTRA_CHARACTER_NAME, character.getName()));
     }
 
-    private void searchMessages(String query) {
-        if (query.trim().isEmpty()) {
-            return;
-        }
-        databaseExecutor.execute(() -> {
-            List<ChatMessage> results = chatRepository.searchMessages(characterId, query, 30);
-            mainHandler.post(() -> {
-                if (isFinishing() || isDestroyed()) {
-                    return;
-                }
-                if (results.isEmpty()) {
-                    Toast.makeText(this, R.string.no_search_results, Toast.LENGTH_SHORT).show();
-                    return;
-                }
-                String[] labels = new String[results.size()];
-                for (int index = 0; index < results.size(); index++) {
-                    labels[index] = searchResultLabel(results.get(index));
-                }
-                new MaterialAlertDialogBuilder(this)
-                        .setTitle(R.string.search_messages)
-                        .setItems(labels, (dialog, which) -> openSearchResult(results.get(which)))
-                        .setNegativeButton(R.string.cancel, null)
-                        .show();
-            });
-        });
-    }
-
-    private String searchResultLabel(ChatMessage message) {
-        String role = message.getRole() == ChatMessage.Role.USER ? "我" : character.getName();
-        String content = message.getContent().replace('\n', ' ').trim();
-        if (content.isEmpty() && message.hasImageAttachment()) {
-            content = "[图片]";
-        }
-        if (content.length() > 70) {
-            content = content.substring(0, 70) + "…";
-        }
-        return role + "：" + content;
-    }
-
-    private void openSearchResult(ChatMessage target) {
-        databaseExecutor.execute(() -> {
-            List<ChatMessage> context = chatRepository.loadMessageContext(
-                    characterId,
-                    target.getId(),
-                    20
-            );
-            mainHandler.post(() -> {
-                if (isFinishing() || isDestroyed()) {
-                    return;
-                }
-                messageAdapter.replaceAll(context);
-                for (int index = 0; index < context.size(); index++) {
-                    if (context.get(index).getId() == target.getId()) {
-                        messageLayoutManager.scrollToPositionWithOffset(index, 120);
-                        break;
-                    }
-                }
-                hasMoreHistory = context.size() >= 21;
-            });
-        });
-    }
-
     private void handlePrimaryAction() {
-        if (activeStream != null) {
-            stopStreaming();
+        if (chatViewModel.isStreaming()) {
+            chatViewModel.stopStreaming();
             return;
         }
         sendMessage();
@@ -360,7 +455,7 @@ public final class ChatActivity extends AppCompatActivity {
                 : pendingReplyMessage.getId();
         String replyPreviewText = pendingReplyMessage == null
                 ? ""
-                : buildMessageReference(pendingReplyMessage);
+                : messageActionsController.buildReference(pendingReplyMessage);
         if (content.isEmpty() && attachmentPath.isEmpty()) {
             return;
         }
@@ -388,7 +483,7 @@ public final class ChatActivity extends AppCompatActivity {
         );
         messageAdapter.add(userMessage);
         scrollToLatest();
-        databaseExecutor.execute(() -> {
+        AppExecutors.get().diskIo().execute(() -> {
             long id = chatRepository.addMessage(
                     character.getId(),
                     userMessage.getRole(),
@@ -414,7 +509,7 @@ public final class ChatActivity extends AppCompatActivity {
 
         AgentCard agentCard = attachmentPath.isEmpty() ? agentRouter.route(content) : null;
         if (agentCard != null) {
-            addAgentCard(agentCard);
+            agentController.addCard(agentCard);
             return;
         }
 
@@ -422,8 +517,22 @@ public final class ChatActivity extends AppCompatActivity {
         if (settings.isRemoteConfigured()) {
             startStreaming(settings);
         } else {
-            String mockInput = content.isEmpty() ? "我发送了一张图片。" : content;
+            String mockInput = content.isEmpty() ? getString(R.string.mock_image_input) : content;
             mainHandler.postDelayed(() -> addMockReply(mockInput), 350);
+        }
+    }
+
+    private void startStreaming(ModelSettings settings) {
+        List<ChatMessage> contextWindow = messageAdapter.snapshotRecentTextMessages(20);
+        String memoryPrompt = chatRepository.buildConfirmedMemoryPrompt(characterId);
+        boolean started = chatViewModel.startStreaming(
+                settings,
+                character,
+                contextWindow,
+                memoryPrompt
+        );
+        if (!started) {
+            return; // rejected — already streaming
         }
     }
 
@@ -433,14 +542,14 @@ public final class ChatActivity extends AppCompatActivity {
         }
         attachImageButton.setEnabled(false);
         Toast.makeText(this, R.string.image_processing, Toast.LENGTH_SHORT).show();
-        imageExecutor.execute(() -> {
+        AppExecutors.get().image().execute(() -> {
             try {
                 ImageAttachmentStore.Attachment attachment = imageAttachmentStore.importImage(sourceUri);
                 BitmapFactory.Options options = new BitmapFactory.Options();
                 options.inSampleSize = 4;
                 Bitmap previewBitmap = BitmapFactory.decodeFile(attachment.getPath(), options);
                 mainHandler.post(() -> {
-                    if (isFinishing() || isDestroyed()) {
+                    if (!isHostActive()) {
                         imageAttachmentStore.delete(attachment.getPath());
                         return;
                     }
@@ -449,12 +558,12 @@ public final class ChatActivity extends AppCompatActivity {
                     pendingAttachmentMimeType = attachment.getMimeType();
                     attachmentPreviewImage.setImageBitmap(previewBitmap);
                     attachmentPreview.setVisibility(View.VISIBLE);
-                    attachImageButton.setEnabled(activeStream == null);
+                    attachImageButton.setEnabled(!chatViewModel.isStreaming());
                 });
             } catch (Exception exception) {
                 mainHandler.post(() -> {
-                    if (!isFinishing() && !isDestroyed()) {
-                        attachImageButton.setEnabled(activeStream == null && character != null);
+                    if (isHostActive()) {
+                        attachImageButton.setEnabled(!chatViewModel.isStreaming() && character != null);
                         String detail = exception.getMessage() == null
                                 ? getString(R.string.image_process_failed)
                                 : exception.getMessage();
@@ -472,7 +581,7 @@ public final class ChatActivity extends AppCompatActivity {
         attachmentPreviewImage.setImageDrawable(null);
         attachmentPreview.setVisibility(View.GONE);
         if (deleteFile && !pathToDelete.isEmpty()) {
-            imageExecutor.execute(() -> imageAttachmentStore.delete(pathToDelete));
+            AppExecutors.get().image().execute(() -> imageAttachmentStore.delete(pathToDelete));
         }
     }
 
@@ -480,7 +589,7 @@ public final class ChatActivity extends AppCompatActivity {
         pendingReplyMessage = message;
         replyPreviewText.setText(getString(
                 R.string.replying_to,
-                buildMessageReference(message)
+                messageActionsController.buildReference(message)
         ));
         replyPreview.setVisibility(View.VISIBLE);
         messageInput.requestFocus();
@@ -492,310 +601,9 @@ public final class ChatActivity extends AppCompatActivity {
         replyPreview.setVisibility(View.GONE);
     }
 
-    private String buildMessageReference(ChatMessage message) {
-        String content = message.getContent().replace('\n', ' ').trim();
-        if (content.isEmpty() && message.hasImageAttachment()) {
-            content = "[图片]";
-        }
-        if (content.length() > 80) {
-            content = content.substring(0, 80) + "…";
-        }
-        String speaker = message.getRole() == ChatMessage.Role.USER
-                ? "我"
-                : character.getName();
-        return speaker + "：" + content;
-    }
-
-    private void addAgentCard(AgentCard card) {
-        long createdAt = System.currentTimeMillis();
-        boolean requiresConfirmation = card.requiresConfirmation();
-        String actionToken = requiresConfirmation ? UUID.randomUUID().toString() : "";
-        ChatMessage message = new ChatMessage(
-                -1,
-                ChatMessage.Role.ASSISTANT,
-                requiresConfirmation
-                        ? ChatMessage.Kind.AGENT_PROPOSAL
-                        : ChatMessage.Kind.AGENT_CARD,
-                card.getTitle(),
-                card.getBody(),
-                createdAt,
-                actionToken,
-                card.getActionType(),
-                requiresConfirmation
-                        ? ChatMessage.ActionState.PENDING
-                        : ChatMessage.ActionState.NONE
-        );
-        messageAdapter.add(message);
-        scrollToLatest();
-        databaseExecutor.execute(() -> {
-            long id = chatRepository.addMessage(
-                    character.getId(),
-                    message.getRole(),
-                    message.getKind(),
-                    message.getTitle(),
-                    message.getContent(),
-                    message.getCreatedAt(),
-                    message.getActionToken(),
-                    message.getActionType(),
-                    message.getActionState()
-            );
-            mainHandler.post(() -> messageAdapter.assignPersistedId(
-                    createdAt,
-                    ChatMessage.Role.ASSISTANT,
-                    id
-            ));
-        });
-        if (requiresConfirmation) {
-            databaseExecutor.execute(() -> chatRepository.addAgentAudit(
-                    character.getId(),
-                    message.getActionToken(),
-                    message.getActionType(),
-                    ChatMessage.ActionState.PENDING.name(),
-                    message.getContent(),
-                    message.getCreatedAt()
-            ));
-        }
-    }
-
-    private void confirmAgentAction(ChatMessage proposal) {
-        messageAdapter.updateActionState(
-                proposal.getActionToken(),
-                ChatMessage.ActionState.CONFIRMED
-        );
-        if (!"clear_conversation".equals(proposal.getActionType())) {
-            failAgentAction(proposal, "暂不支持该操作");
-            return;
-        }
-        databaseExecutor.execute(() -> {
-            long createdAt = System.currentTimeMillis();
-            String title = "会话已清空";
-            String content = "当前角色的聊天消息已删除，角色、模型设置和其他会话未受影响。";
-            try {
-                List<String> attachmentPaths = chatRepository.loadAttachmentPaths(character.getId());
-                long id = chatRepository.clearConversationAndAddAgentResult(
-                        character.getId(),
-                        proposal.getActionToken(),
-                        proposal.getActionType(),
-                        title,
-                        content,
-                        createdAt
-                );
-                for (String attachmentPath : attachmentPaths) {
-                    imageAttachmentStore.delete(attachmentPath);
-                }
-                ChatMessage result = new ChatMessage(
-                        id,
-                        ChatMessage.Role.ASSISTANT,
-                        ChatMessage.Kind.AGENT_RESULT,
-                        title,
-                        content,
-                        createdAt,
-                        proposal.getActionToken(),
-                        proposal.getActionType(),
-                        ChatMessage.ActionState.SUCCEEDED
-                );
-                mainHandler.post(() -> {
-                    if (isFinishing() || isDestroyed()) {
-                        return;
-                    }
-                    messageAdapter.replaceAll(List.of(result));
-                    scrollToLatest();
-                });
-            } catch (RuntimeException exception) {
-                mainHandler.post(() -> failAgentAction(proposal, "执行失败，请稍后重试"));
-            }
-        });
-    }
-
-    private void cancelAgentAction(ChatMessage proposal) {
-        messageAdapter.updateActionState(
-                proposal.getActionToken(),
-                ChatMessage.ActionState.CANCELLED
-        );
-        databaseExecutor.execute(() -> {
-            chatRepository.updateActionState(
-                    proposal.getActionToken(),
-                    ChatMessage.ActionState.CANCELLED
-            );
-            chatRepository.addAgentAudit(
-                    character.getId(),
-                    proposal.getActionToken(),
-                    proposal.getActionType(),
-                    ChatMessage.ActionState.CANCELLED.name(),
-                    "用户取消执行",
-                    System.currentTimeMillis()
-            );
-        });
-    }
-
-    private void failAgentAction(ChatMessage proposal, String detail) {
-        messageAdapter.updateActionState(
-                proposal.getActionToken(),
-                ChatMessage.ActionState.FAILED
-        );
-        databaseExecutor.execute(() -> {
-            chatRepository.updateActionState(
-                    proposal.getActionToken(),
-                    ChatMessage.ActionState.FAILED
-            );
-            chatRepository.addAgentAudit(
-                    character.getId(),
-                    proposal.getActionToken(),
-                    proposal.getActionType(),
-                    ChatMessage.ActionState.FAILED.name(),
-                    detail,
-                    System.currentTimeMillis()
-            );
-        });
-    }
-
     private void addMockReply(String userMessage) {
         String reply = replyEngine.reply(character, userMessage);
         addAndPersistAssistantText(reply, System.currentTimeMillis());
-    }
-
-    private void startStreaming(ModelSettings settings) {
-        streamingText = new StringBuilder();
-        synchronized (streamBufferLock) {
-            pendingStreamDeltas.setLength(0);
-            streamRenderScheduled = false;
-        }
-        streamingCreatedAt = System.currentTimeMillis();
-        List<ChatMessage> contextWindow = messageAdapter.snapshotRecentTextMessages(20);
-        messageAdapter.add(new ChatMessage(
-                -1,
-                ChatMessage.Role.ASSISTANT,
-                getString(R.string.stream_connecting),
-                streamingCreatedAt
-        ));
-        setStreamingUi(true);
-        scrollToLatest();
-
-        activeStream = modelClient.streamReply(
-                settings,
-                character,
-                contextWindow,
-                chatRepository.buildConfirmedMemoryPrompt(characterId),
-                new OpenAiCompatibleClient.StreamListener() {
-                    @Override
-                    public void onOpen() {
-                    }
-
-                    @Override
-                    public void onDelta(String delta) {
-                        queueStreamDelta(delta);
-                    }
-
-                    @Override
-                    public void onComplete() {
-                        mainHandler.post(() -> {
-                            mainHandler.removeCallbacks(streamRenderRunnable);
-                            flushStreamDeltas();
-                            completeStreaming();
-                        });
-                    }
-
-                    @Override
-                    public void onError(String message) {
-                        mainHandler.post(() -> failStreaming(message));
-                    }
-                }
-        );
-    }
-
-    private void queueStreamDelta(String delta) {
-        synchronized (streamBufferLock) {
-            pendingStreamDeltas.append(delta);
-            if (streamRenderScheduled) {
-                return;
-            }
-            streamRenderScheduled = true;
-        }
-        mainHandler.postDelayed(streamRenderRunnable, 50);
-    }
-
-    private void flushStreamDeltas() {
-        if (activeStream == null) {
-            return;
-        }
-        String delta;
-        synchronized (streamBufferLock) {
-            delta = pendingStreamDeltas.toString();
-            pendingStreamDeltas.setLength(0);
-            streamRenderScheduled = false;
-        }
-        if (delta.isEmpty()) {
-            return;
-        }
-        boolean shouldScroll = isNearBottom();
-        streamingText.append(delta);
-        messageAdapter.updateLast(new ChatMessage(
-                -1,
-                ChatMessage.Role.ASSISTANT,
-                streamingText.toString(),
-                streamingCreatedAt
-        ));
-        if (shouldScroll) {
-            scrollToLatest();
-        }
-    }
-
-    private void completeStreaming() {
-        if (activeStream == null) {
-            return;
-        }
-        String finalText = streamingText.toString().trim();
-        if (finalText.isEmpty()) {
-            finalText = "模型服务没有返回文本内容";
-            messageAdapter.updateLast(new ChatMessage(
-                    -1,
-                    ChatMessage.Role.ASSISTANT,
-                    finalText,
-                    streamingCreatedAt
-            ));
-        }
-        persistAssistantText(finalText, streamingCreatedAt);
-        activeStream = null;
-        setStreamingUi(false);
-    }
-
-    private void failStreaming(String errorMessage) {
-        if (activeStream == null) {
-            return;
-        }
-        String visibleMessage = "请求失败：" + errorMessage;
-        messageAdapter.updateLast(new ChatMessage(
-                -1,
-                ChatMessage.Role.ASSISTANT,
-                visibleMessage,
-                streamingCreatedAt
-        ));
-        activeStream = null;
-        setStreamingUi(false);
-        scrollToLatest();
-    }
-
-    private void stopStreaming() {
-        OpenAiCompatibleClient.StreamCall stream = activeStream;
-        if (stream == null) {
-            return;
-        }
-        stream.cancel();
-        mainHandler.removeCallbacks(streamRenderRunnable);
-        flushStreamDeltas();
-        String partialText = streamingText.toString().trim();
-        String finalText = partialText.isEmpty()
-                ? getString(R.string.stream_cancelled)
-                : partialText + "\n\n[已停止生成]";
-        messageAdapter.updateLast(new ChatMessage(
-                -1,
-                ChatMessage.Role.ASSISTANT,
-                finalText,
-                streamingCreatedAt
-        ));
-        persistAssistantText(finalText, streamingCreatedAt);
-        activeStream = null;
-        setStreamingUi(false);
     }
 
     private void setStreamingUi(boolean streaming) {
@@ -816,7 +624,7 @@ public final class ChatActivity extends AppCompatActivity {
     }
 
     private void persistAssistantText(String content, long createdAt) {
-        databaseExecutor.execute(() -> {
+        AppExecutors.get().diskIo().execute(() -> {
             long id = chatRepository.addMessage(
                     character.getId(),
                     ChatMessage.Role.ASSISTANT,
@@ -845,176 +653,6 @@ public final class ChatActivity extends AppCompatActivity {
         }
     }
 
-    private void showMessageActions(ChatMessage message) {
-        if (message.getKind() != ChatMessage.Kind.TEXT) {
-            return;
-        }
-        if (message.getId() <= 0) {
-            copyMessage(message);
-            return;
-        }
-        List<String> actions = new ArrayList<>();
-        actions.add(getString(R.string.copy_message));
-        actions.add(getString(R.string.reply_message));
-        if (message.getRole() == ChatMessage.Role.ASSISTANT) {
-            actions.add(getString(R.string.regenerate_message));
-        }
-        actions.add(getString(R.string.react_message));
-        actions.add(getString(R.string.edit_message));
-        actions.add(getString(R.string.delete_message));
-        new MaterialAlertDialogBuilder(this)
-                .setTitle(R.string.message_actions)
-                .setItems(actions.toArray(new String[0]), (dialog, which) -> {
-                    String action = actions.get(which);
-                    if (action.equals(getString(R.string.copy_message))) {
-                        copyMessage(message);
-                    } else if (action.equals(getString(R.string.reply_message))) {
-                        beginReply(message);
-                    } else if (action.equals(getString(R.string.regenerate_message))) {
-                        regenerateMessage(message);
-                    } else if (action.equals(getString(R.string.react_message))) {
-                        showReactionPicker(message);
-                    } else if (action.equals(getString(R.string.edit_message))) {
-                        editMessage(message);
-                    } else {
-                        confirmDeleteMessage(message);
-                    }
-                })
-                .show();
-    }
-
-    private void showReactionPicker(ChatMessage message) {
-        String[] reactions = {"👍", "❤️", "😂", "😮", "😢", getString(R.string.remove_reaction)};
-        new MaterialAlertDialogBuilder(this)
-                .setTitle(R.string.react_message)
-                .setItems(reactions, (dialog, which) -> {
-                    String reaction = which == reactions.length - 1 ? "" : reactions[which];
-                    databaseExecutor.execute(() -> {
-                        try {
-                            chatRepository.updateMessageReaction(message.getId(), reaction);
-                            mainHandler.post(() -> messageAdapter.updateReaction(
-                                    message.getId(),
-                                    reaction
-                            ));
-                        } catch (RuntimeException exception) {
-                            mainHandler.post(this::showMessageActionFailure);
-                        }
-                    });
-                })
-                .show();
-    }
-
-    private void regenerateMessage(ChatMessage message) {
-        if (activeStream != null || message.getRole() != ChatMessage.Role.ASSISTANT) {
-            return;
-        }
-        databaseExecutor.execute(() -> {
-            ChatMessage source = chatRepository.loadPreviousUserMessage(
-                    characterId,
-                    message.getId()
-            );
-            if (source == null) {
-                mainHandler.post(() -> Toast.makeText(
-                        this,
-                        R.string.cannot_regenerate,
-                        Toast.LENGTH_SHORT
-                ).show());
-                return;
-            }
-            try {
-                chatRepository.deleteMessage(message.getId());
-            } catch (RuntimeException exception) {
-                mainHandler.post(this::showMessageActionFailure);
-                return;
-            }
-            mainHandler.post(() -> {
-                messageAdapter.removeMessage(message.getId());
-                ModelSettings settings = settingsStore.load();
-                if (settings.isRemoteConfigured()) {
-                    startStreaming(settings);
-                } else {
-                    String input = source.getContent().isEmpty()
-                            ? "我发送了一张图片。"
-                            : source.getContent();
-                    addMockReply(input);
-                }
-            });
-        });
-    }
-
-    private void copyMessage(ChatMessage message) {
-        ClipboardManager clipboard = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
-        clipboard.setPrimaryClip(ClipData.newPlainText("message", message.getContent()));
-        Toast.makeText(this, R.string.message_copied, Toast.LENGTH_SHORT).show();
-    }
-
-    private void editMessage(ChatMessage message) {
-        EditText editInput = new EditText(this);
-        editInput.setMinLines(3);
-        editInput.setMaxLines(10);
-        editInput.setText(message.getContent());
-        editInput.setSelection(message.getContent().length());
-        AlertDialog dialog = new MaterialAlertDialogBuilder(this)
-                .setTitle(R.string.edit_message_title)
-                .setView(editInput)
-                .setNegativeButton(R.string.cancel, null)
-                .setPositiveButton(R.string.save_changes, null)
-                .create();
-        dialog.setOnShowListener(ignored -> dialog.getButton(AlertDialog.BUTTON_POSITIVE)
-                .setOnClickListener(view -> {
-                    String updatedContent = editInput.getText().toString().trim();
-                    if (updatedContent.isEmpty() && !message.hasImageAttachment()) {
-                        Toast.makeText(this, R.string.message_cannot_be_empty, Toast.LENGTH_SHORT).show();
-                        return;
-                    }
-                    dialog.dismiss();
-                    databaseExecutor.execute(() -> {
-                        try {
-                            chatRepository.updateMessageContent(message.getId(), updatedContent);
-                            mainHandler.post(() -> {
-                                messageAdapter.updateMessageContent(message.getId(), updatedContent);
-                                Toast.makeText(this, R.string.message_updated, Toast.LENGTH_SHORT).show();
-                            });
-                        } catch (RuntimeException exception) {
-                            mainHandler.post(this::showMessageActionFailure);
-                        }
-                    });
-                }));
-        dialog.show();
-    }
-
-    private void confirmDeleteMessage(ChatMessage message) {
-        new MaterialAlertDialogBuilder(this)
-                .setTitle(R.string.delete_message_title)
-                .setMessage(R.string.delete_message_description)
-                .setNegativeButton(R.string.cancel, null)
-                .setPositiveButton(R.string.delete_message, (dialog, which) ->
-                        databaseExecutor.execute(() -> {
-                            try {
-                                chatRepository.deleteMessage(message.getId());
-                                if (message.hasImageAttachment()) {
-                                    imageAttachmentStore.delete(message.getAttachmentPath());
-                                }
-                                mainHandler.post(() -> {
-                                    if (pendingReplyMessage != null
-                                            && pendingReplyMessage.getId() == message.getId()) {
-                                        clearPendingReply();
-                                    }
-                                    messageAdapter.removeMessage(message.getId());
-                                    Toast.makeText(this, R.string.message_deleted, Toast.LENGTH_SHORT).show();
-                                });
-                            } catch (RuntimeException exception) {
-                                mainHandler.post(this::showMessageActionFailure);
-                            }
-                        })
-                )
-                .show();
-    }
-
-    private void showMessageActionFailure() {
-        Toast.makeText(this, R.string.message_action_failed, Toast.LENGTH_SHORT).show();
-    }
-
     private void scrollToLatest() {
         if (messageAdapter.getItemCount() > 0) {
             messageList.scrollToPosition(messageAdapter.getItemCount() - 1);
@@ -1024,20 +662,15 @@ public final class ChatActivity extends AppCompatActivity {
     @Override
     protected void onDestroy() {
         persistDraft();
-        if (activeStream != null) {
-            activeStream.cancel();
-            activeStream = null;
-        }
-        modelClient.close();
+        // Do NOT cancel the stream or close modelClient here — the ViewModel
+        // owns that lifecycle. If this is a configuration change, onCleared()
+        // will not run and the stream continues in the ViewModel.
+        // If the user is genuinely leaving, onCleared() will cancel it.
         clearPendingAttachment(true);
         clearPendingReply();
         messageAdapter.close();
         mainHandler.removeCallbacksAndMessages(null);
-        databaseExecutor.execute(() -> {
-            chatRepository.close();
-        });
-        databaseExecutor.shutdown();
-        imageExecutor.shutdown();
+        AppExecutors.get().diskIo().execute(chatRepository::close);
         super.onDestroy();
     }
 }

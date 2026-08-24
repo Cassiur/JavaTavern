@@ -1,6 +1,8 @@
 package com.zcz.javatavern;
 
+import android.content.Intent;
 import android.os.Bundle;
+import android.view.View;
 import android.widget.EditText;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -11,13 +13,10 @@ import com.google.android.material.button.MaterialButton;
 import com.google.android.material.textfield.TextInputLayout;
 import com.zcz.javatavern.data.CharacterRepository;
 import com.zcz.javatavern.model.CharacterProfile;
-
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import com.zcz.javatavern.util.AppExecutors;
 
 public final class CharacterEditorActivity extends AppCompatActivity {
     public static final String EXTRA_CHARACTER_ID = "editor_character_id";
-    private final ExecutorService databaseExecutor = Executors.newSingleThreadExecutor();
     private CharacterRepository characterRepository;
     private String characterId = "";
     private TextInputLayout nameLayout;
@@ -50,13 +49,20 @@ public final class CharacterEditorActivity extends AppCompatActivity {
         saveButton.setOnClickListener(view -> saveCharacter());
         if (!characterId.isEmpty()) {
             ((TextView) findViewById(R.id.editorTitle)).setText(R.string.edit_character_title);
+            View worldBookButton = findViewById(R.id.worldBookButton);
+            worldBookButton.setVisibility(View.VISIBLE);
+            worldBookButton.setOnClickListener(view -> {
+                Intent intent = new Intent(this, WorldBookEditorActivity.class);
+                intent.putExtra(WorldBookEditorActivity.EXTRA_CHARACTER_ID, characterId);
+                startActivity(intent);
+            });
             loadCharacter();
         }
     }
 
     private void loadCharacter() {
         saveButton.setEnabled(false);
-        databaseExecutor.execute(() -> {
+        AppExecutors.get().diskIo().execute(() -> {
             CharacterProfile character = characterRepository.findById(characterId);
             runOnUiThread(() -> {
                 if (isFinishing() || isDestroyed()) {
@@ -100,7 +106,7 @@ public final class CharacterEditorActivity extends AppCompatActivity {
         String finalDescription = description;
         String finalRules = rules;
         saveButton.setEnabled(false);
-        databaseExecutor.execute(() -> {
+        AppExecutors.get().diskIo().execute(() -> {
             try {
                 if (characterId.isEmpty()) {
                     characterRepository.createCharacter(name, finalDescription, greeting, finalRules);
@@ -129,8 +135,7 @@ public final class CharacterEditorActivity extends AppCompatActivity {
 
     @Override
     protected void onDestroy() {
-        databaseExecutor.execute(characterRepository::close);
-        databaseExecutor.shutdown();
+        AppExecutors.get().diskIo().execute(characterRepository::close);
         super.onDestroy();
     }
 }

@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Theme split into Base + light/dark variants (Google DayNight template).
+  Base holds shared Material tokens; variants only flip the system-bar icon
+  lightness. values-night/themes.xml overrides Theme.JavaTavern with dark icons.
+-->
+<resources>
+    <style name="Theme.JavaTavern.Base" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/primary</item>
+        <item name="colorPrimaryVariant">@color/primary_dark</item>
+        <item name="colorOnPrimary">@color/on_primary</item>
+        <item name="android:fontFamily">sans</item>
+        <item name="android:navigationBarColor">@color/surface</item>
+        <item name="android:statusBarColor">@color/background</item>
+        <item name="android:windowBackground">@color/background</item>
+        <item name="android:windowActionModeOverlay">true</item>
+    </style>
+
+    <style name="Theme.JavaTavern" parent="Theme.JavaTavern.Base">
+        <item name="android:windowLightStatusBar">true</item>
+    </style>
+</resources>

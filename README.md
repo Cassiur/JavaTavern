@@ -18,12 +18,13 @@ Preview builds currently use a development signature. Back up local data before 
 
 ## What works today
 
-- Native one-to-one conversations with local SQLite history.
+- Native one-to-one and multi-character group conversations with local SQLite history.
 - OpenAI-compatible HTTPS endpoints with SSE streaming and stop support.
 - Android Photo Picker image messages and multimodal `image_url` requests.
-- SillyTavern V2 JSON character import with keyword and constant world-book entries.
+- SillyTavern-compatible JSON and PNG character import with editable world-book entries.
 - In-app character creation and editing, without preparing a card file first.
 - OpenAI, DeepSeek, OpenRouter, and custom provider presets with a `/models` connection check.
+- Built-in and custom generation presets for temperature, top-p, token limits, and penalties.
 - Recent-message keyset pagination, FTS search, and context jump.
 - Per-character draft recovery plus message copy, edit, and delete actions.
 - Reply quotes, emoji reactions, and assistant-message regeneration.
@@ -40,7 +41,7 @@ Requirements:
 - Android 7.0 or newer.
 
 ```bash
-git clone <your-fork-url>
+git clone https://github.com/Cassiur/JavaTavern.git
 cd JavaTavern
 ./gradlew assembleDebug
 ```
@@ -57,15 +58,16 @@ Windows PowerShell users can run the same tasks with `./gradlew.bat`.
 
 ## Character cards
 
-Use **Import character card** on the home screen and select a V2 JSON card. A small example is available at [`samples/character-card-v2.json`](samples/character-card-v2.json).
+Use **Import character card** on the home screen and select a JSON or PNG card. A small JSON example is available at [`samples/character-card-v2.json`](samples/character-card-v2.json).
 
 Current compatibility:
 
 - V2 JSON name, description, personality, scenario, first message, and system prompt;
-- embedded character-book entries with keywords, enabled state, and constant activation;
+- PNG `tEXt` / uncompressed `iTXt` metadata using common `chara` and `ccv3` keywords;
+- embedded character-book entries with keyword, constant, position, priority, depth, probability, and recursion settings;
 - duplicate-file detection with a source hash.
 
-PNG metadata, alternate greetings, example dialogue, creator metadata, and round-trip export remain planned.
+Alternate greetings, example dialogue, creator metadata, compressed `iTXt`, and round-trip export remain planned.
 
 ## Privacy model
 
@@ -77,20 +79,21 @@ JavaTavern currently includes no analytics, ads, account system, or project-oper
 
 ```text
 Activity + RecyclerView
-  ├─ CharacterRepository / ChatHistoryStore
-  ├─ CharacterCardParser / WorldBookPromptBuilder
-  ├─ ImageAttachmentStore / MessageImageLoader
-  ├─ LocalAgentRouter
+  ├─ ChatViewModel / StreamSession / StreamAccumulator
+  ├─ ChatRepository / TavernDatabase
+  ├─ CharacterCardParser / PngCharacterCardReader
+  ├─ WorldBookPromptBuilder / GroupPromptBuilder
+  ├─ ChatAgentController / LocalAgentRouter
   └─ OpenAiCompatibleClient / SseEventParser
 ```
 
-The current largest debt is `ChatActivity`, which still coordinates too many responsibilities. The next structural milestone is `ViewModel + Repository + SavedStateHandle`, followed by Room migration tests.
+The stream lifecycle is retained in `ChatViewModel`, while repositories share one versioned SQLite database. `ChatActivity` still owns substantial UI orchestration; the next structural milestone is a dedicated screen-state model with `SavedStateHandle`, followed by migration instrumentation tests and a Room evaluation.
 
 ## Roadmap
 
 - multiple conversations per character, alternatives, and persistent branching;
 - versioned export/import with conflict preview;
-- PNG character-card metadata and broader provider adapters;
+- broader character-card fields and native provider adapters;
 - Macrobenchmark, 10,000-message tests, accessibility, and vivo device reports.
 
 See [`docs/PRODUCT_PRINCIPLES.md`](docs/PRODUCT_PRINCIPLES.md) and [`docs/COMPETITIVE_RESEARCH.md`](docs/COMPETITIVE_RESEARCH.md) for product direction.

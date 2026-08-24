@@ -3,6 +3,7 @@
     <color name="primary">#65558F</color>
     <color name="primary_dark">#4F3F75</color>
     <color name="primary_soft">#DFD4ED</color>
+    <color name="on_primary">#FFFFFF</color>
     <color name="background">#F7F4FA</color>
     <color name="surface">#FFFFFF</color>
     <color name="input_background">#EEEAF2</color>

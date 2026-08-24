@@ -1,35 +1,47 @@
 # JavaTavern 架构
 
-## 当前边界
+## 当前结构
 
 ```text
-ChatActivity + RecyclerView
-  ├─ ChatRepository
-  │    ├─ CharacterRepository
-  │    ├─ ChatHistoryStore
-  │    └─ LongTermMemoryStore
-  ├─ CharacterCardParser / WorldBookPromptBuilder
-  ├─ ImageAttachmentStore / MessageImageLoader
-  ├─ LocalAgentRouter
-  └─ OpenAiCompatibleClient / SseEventParser
+MainActivity / GroupListActivity
+  ├─ CharacterRepository / GroupRepository
+  ├─ CharacterCardParser / PngCharacterCardReader / AvatarStore
+  └─ TavernDatabase
+
+ChatActivity
+  ├─ ChatViewModel
+  │    ├─ StreamSession / StreamAccumulator
+  │    ├─ OpenAiCompatibleClient
+  │    └─ ChatRepository
+  ├─ ChatAgentController
+  ├─ ChatMessageActionsController / ChatSearchController
+  └─ MessageAdapter / MessageImageLoader
+
+GroupChatActivity
+  ├─ GroupRepository / ChatRepository
+  ├─ GroupPromptBuilder
+  └─ OpenAiCompatibleClient
 ```
 
-`ChatRepository` 是聊天页面唯一的数据访问边界，统一角色、消息、搜索、Agent 审计和确认式长期记忆。`ChatActivity` 仍负责网络编排、临时输入和列表更新，这是下一阶段需要继续拆分的部分。
+私聊流式会话由 `ChatViewModel` 持有，Activity 通过不可变快照渲染状态。`StreamSession` 负责一次请求的状态转换、终态竞争和一次性落库，`StreamAccumulator` 负责增量文本聚合。
+
+角色、世界书、消息、FTS、Agent 审计、生成预设和群聊共用版本化 `TavernDatabase`。首次打开时会迁移旧 `characters.db` 与 `java_tavern.db`；迁移失败会回滚并保留源文件，不静默删除旧数据。确认式长期记忆仍保存在应用私有 `SharedPreferences`。
 
 ## 已落实的工程约束
 
-- Java 17 与 XML Views，最低 Android 7.0。
-- SQLite v1→v6 增量迁移，不通过删库规避兼容问题。
-- 数据库使用单线程 `ExecutorService`，UI 更新切回主线程。
-- OpenAI-compatible SSE 请求支持 50 ms 合并刷新、停止和生命周期取消。
-- 图片后台压缩后写入私有目录，列表使用 LRU 缓存异步解码。
-- API Key 使用 Android Keystore AES/GCM，加密配置只允许 HTTPS。
+- Java 17、XML Views、最低 Android 7.0。
+- 数据库和文件写入使用进程级串行磁盘执行器，不阻塞主线程。
+- 网络请求使用有界线程池；页面销毁时取消仍在运行的请求。
+- OpenAI-compatible SSE 支持合并刷新、主动停止和异常终态。
+- 图片后台压缩后写入私有目录，列表使用采样解码和 LRU 缓存。
+- API Key 使用 Android Keystore AES/GCM，远程地址只允许 HTTPS。
 - Agent 写操作经过提案、确认、事务执行、结果和审计。
-- 长期记忆只能由用户管理，并以长度受限的背景段落注入 Prompt。
+- 所有导入内容按不可信输入处理，PNG chunk 长度和 JSON 字段均做边界校验。
 
-## 下一阶段
+## 当前债务
 
-1. 引入 `ChatViewModel + SavedStateHandle`，接管加载、发送、流式状态和旋转恢复。
-2. 增加 `conversations`、`message_variants` 与分支关系，支持多会话和左右切换。
-3. 把 Provider、AgentTool、备份恢复抽象为独立接口，减少 Activity 条件分支。
-4. 增加数据库迁移测试、UI 测试和 Macrobenchmark。
+1. `ChatActivity` 已拆分流式与操作控制器，但仍承担较多页面编排；需要统一 screen state 和 `SavedStateHandle`。
+2. 群聊仍是首版 Activity 编排，应迁移到 ViewModel 并补停止、节流和旋转恢复。
+3. 手写 SQLite 缺少 migration instrumentation test；继续扩 schema 前应补测试并评估 Room。
+4. Provider 仍集中在 OpenAI-compatible 实现，Gemini/Anthropic 原生协议应通过接口隔离。
+5. 尚无 Macrobenchmark、长列表、弱网、耗电与真机对照报告。
