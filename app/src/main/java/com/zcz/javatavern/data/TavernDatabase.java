@@ -25,11 +25,12 @@ import java.io.File;
 public final class TavernDatabase extends SQLiteOpenHelper {
     private static final String TAG = "TavernDatabase";
     private static final String DATABASE_NAME = "tavern.db";
-    private static final int DATABASE_VERSION = 4;
+    private static final int DATABASE_VERSION = 5;
 
     public static final String TABLE_CHARACTERS = "characters";
     public static final String TABLE_WORLD_ENTRIES = "world_entries";
     public static final String TABLE_MESSAGES = "messages";
+    public static final String TABLE_MESSAGE_VERSIONS = "message_versions";
     public static final String TABLE_AGENT_AUDIT = "agent_audit";
     public static final String TABLE_MESSAGES_FTS = "messages_fts";
     public static final String TABLE_PRESETS = "presets";
@@ -62,6 +63,7 @@ public final class TavernDatabase extends SQLiteOpenHelper {
     public void onCreate(SQLiteDatabase database) {
         createCharacterTables(database);
         createMessageTables(database);
+        createMessageVersionTable(database);
         createPresetTable(database);
         createGroupTable(database);
         seedPresets(database);
@@ -87,6 +89,13 @@ public final class TavernDatabase extends SQLiteOpenHelper {
                     " ADD COLUMN speaker_id TEXT NOT NULL DEFAULT ''");
             database.execSQL("ALTER TABLE " + TABLE_MESSAGES +
                     " ADD COLUMN speaker_name TEXT NOT NULL DEFAULT ''");
+        }
+        if (oldVersion < 5) {
+            createMessageVersionTable(database);
+            database.execSQL("ALTER TABLE " + TABLE_MESSAGES +
+                    " ADD COLUMN version_count INTEGER NOT NULL DEFAULT 1");
+            database.execSQL("ALTER TABLE " + TABLE_MESSAGES +
+                    " ADD COLUMN active_version INTEGER NOT NULL DEFAULT 1");
         }
     }
 
@@ -162,6 +171,8 @@ public final class TavernDatabase extends SQLiteOpenHelper {
                         "reaction TEXT NOT NULL DEFAULT ''," +
                         "speaker_id TEXT NOT NULL DEFAULT ''," +
                         "speaker_name TEXT NOT NULL DEFAULT ''," +
+                        "version_count INTEGER NOT NULL DEFAULT 1," +
+                        "active_version INTEGER NOT NULL DEFAULT 1," +
                         "content TEXT NOT NULL," +
                         "created_at INTEGER NOT NULL)"
         );
@@ -184,6 +195,28 @@ public final class TavernDatabase extends SQLiteOpenHelper {
                         TABLE_AGENT_AUDIT + "(character_id, created_at)"
         );
         createMessageSearch(database);
+    }
+
+    /**
+     * 重 roll 的多版本存储。
+     *
+     * <p>一条逻辑消息在 {@code messages} 里仍只占一行（内容 = 当前显示的那一版），
+     * 因而对话顺序、分页、全文检索都不受影响；历史版本按行追加在这里，切换版本
+     * 只是把对应内容写回 {@code messages.content}。{@code version_count} /
+     * {@code active_version} 是消息行上的冗余计数，默认 1 对旧数据天然兼容。
+     */
+    private void createMessageVersionTable(SQLiteDatabase database) {
+        database.execSQL(
+                "CREATE TABLE IF NOT EXISTS " + TABLE_MESSAGE_VERSIONS + " (" +
+                        "id INTEGER PRIMARY KEY AUTOINCREMENT," +
+                        "message_id INTEGER NOT NULL," +
+                        "content TEXT NOT NULL," +
+                        "created_at INTEGER NOT NULL)"
+        );
+        database.execSQL(
+                "CREATE INDEX IF NOT EXISTS index_message_versions_message ON " +
+                        TABLE_MESSAGE_VERSIONS + "(message_id, id)"
+        );
     }
 
     private void createMessageSearch(SQLiteDatabase database) {

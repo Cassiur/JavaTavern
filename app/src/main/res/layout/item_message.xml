@@ -66,6 +66,44 @@
             android:textSize="18sp"
             android:visibility="gone" />
 
+        <LinearLayout
+            android:id="@+id/messageVersionBar"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="end"
+            android:gravity="center_vertical"
+            android:paddingStart="6dp"
+            android:paddingEnd="6dp"
+            android:paddingBottom="4dp"
+            android:visibility="gone">
+
+            <ImageButton
+                android:id="@+id/messageVersionPrevious"
+                android:layout_width="28dp"
+                android:layout_height="28dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="@string/message_version_previous"
+                android:src="@drawable/ic_chevron_left" />
+
+            <TextView
+                android:id="@+id/messageVersionLabel"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:minWidth="42dp"
+                android:gravity="center"
+                android:textColor="@color/text_secondary"
+                android:textSize="12sp" />
+
+            <ImageButton
+                android:id="@+id/messageVersionNext"
+                android:layout_width="28dp"
+                android:layout_height="28dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="@string/message_version_next"
+                android:src="@drawable/ic_chevron_right" />
+
+        </LinearLayout>
+
     </LinearLayout>
 
     <LinearLayout

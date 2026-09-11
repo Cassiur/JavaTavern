@@ -37,6 +37,8 @@ public final class ChatMessage {
     private final String replyPreview;
     private final String reaction;
     private final String speakerName;
+    private final int activeVersion;
+    private final int versionCount;
 
     public ChatMessage(long id, Role role, String content, long createdAt) {
         this(id, role, Kind.TEXT, "", content, createdAt);
@@ -170,6 +172,38 @@ public final class ChatMessage {
             String reaction,
             String speakerName
     ) {
+        this(
+                id, role, kind, title, content, createdAt,
+                actionToken, actionType, actionState,
+                attachmentPath, attachmentMimeType,
+                replyToMessageId, replyPreview, reaction, speakerName,
+                1, 1
+        );
+    }
+
+    /**
+     * @param activeVersion 当前显示的版本序号（1-based）
+     * @param versionCount  该消息的历史版本总数（至少 1）
+     */
+    public ChatMessage(
+            long id,
+            Role role,
+            Kind kind,
+            String title,
+            String content,
+            long createdAt,
+            String actionToken,
+            String actionType,
+            ActionState actionState,
+            String attachmentPath,
+            String attachmentMimeType,
+            long replyToMessageId,
+            String replyPreview,
+            String reaction,
+            String speakerName,
+            int activeVersion,
+            int versionCount
+    ) {
         this.id = id;
         this.role = role;
         this.kind = kind;
@@ -185,6 +219,8 @@ public final class ChatMessage {
         this.replyPreview = replyPreview;
         this.reaction = reaction;
         this.speakerName = speakerName == null ? "" : speakerName;
+        this.versionCount = Math.max(1, versionCount);
+        this.activeVersion = Math.min(Math.max(1, activeVersion), this.versionCount);
     }
 
     public long getId() {
@@ -246,6 +282,51 @@ public final class ChatMessage {
     /** 群聊中标记这条 assistant 消息是哪个角色说的（单聊为空）。 */
     public String getSpeakerName() {
         return speakerName;
+    }
+
+    /** 当前显示的版本序号（1-based）；没有多版本时为 1。 */
+    public int getActiveVersion() {
+        return activeVersion;
+    }
+
+    /** 该消息累计生成过的版本总数；没有多版本时为 1。 */
+    public int getVersionCount() {
+        return versionCount;
+    }
+
+    /** 是否有多版本可翻（重 roll 过至少一次）。 */
+    public boolean hasVersions() {
+        return versionCount > 1;
+    }
+
+    public boolean hasPreviousVersion() {
+        return activeVersion > 1;
+    }
+
+    public boolean hasNextVersion() {
+        return activeVersion < versionCount;
+    }
+
+    /** 返回一条仅版本信息不同（内容与其余字段保持不变）的消息副本。 */
+    public ChatMessage withVersionInfo(int activeVersion, int versionCount) {
+        return new ChatMessage(
+                id, role, kind, title, content, createdAt,
+                actionToken, actionType, actionState,
+                attachmentPath, attachmentMimeType,
+                replyToMessageId, replyPreview, reaction, speakerName,
+                activeVersion, versionCount
+        );
+    }
+
+    /** 返回一条内容不同（版本信息与其余字段保持不变）的消息副本。 */
+    public ChatMessage withContent(String content) {
+        return new ChatMessage(
+                id, role, kind, title, content, createdAt,
+                actionToken, actionType, actionState,
+                attachmentPath, attachmentMimeType,
+                replyToMessageId, replyPreview, reaction, speakerName,
+                activeVersion, versionCount
+        );
     }
 
     public boolean hasImageAttachment() {

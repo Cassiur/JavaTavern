@@ -1,9 +1,11 @@
 package com.zcz.javatavern.ui;
 
+import android.content.Context;
 import android.view.Gravity;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
+import android.widget.ImageButton;
 import android.widget.LinearLayout;
 import android.widget.ImageView;
 import android.widget.TextView;
@@ -33,17 +35,32 @@ public final class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.Me
         void onMessageLongPressed(ChatMessage message);
     }
 
+    /** 重 roll 版本翻页回调；{@code targetVersion} 为 1-based 的目标版本序号。 */
+    public interface MessageVersionListener {
+        void onSwitchVersion(ChatMessage message, int targetVersion);
+    }
+
     private final List<ChatMessage> messages = new ArrayList<>();
     private final AgentActionListener agentActionListener;
     private final MessageActionListener messageActionListener;
+    private final MessageVersionListener messageVersionListener;
     private final MessageImageLoader imageLoader = new MessageImageLoader();
 
     public MessageAdapter(
             AgentActionListener agentActionListener,
             MessageActionListener messageActionListener
     ) {
+        this(agentActionListener, messageActionListener, (message, targetVersion) -> { });
+    }
+
+    public MessageAdapter(
+            AgentActionListener agentActionListener,
+            MessageActionListener messageActionListener,
+            MessageVersionListener messageVersionListener
+    ) {
         this.agentActionListener = agentActionListener;
         this.messageActionListener = messageActionListener;
+        this.messageVersionListener = messageVersionListener;
     }
 
     public void replaceAll(List<ChatMessage> newMessages) {
@@ -138,20 +155,38 @@ public final class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.Me
      * @param createdAt   timestamp used as the stable row identity
      */
     public void upsertStreamRow(long streamOpId, String text, long createdAt) {
+        upsertStreamRow(streamOpId, text, createdAt, -1L);
+    }
+
+    /**
+     * 重 roll 感知版本：{@code targetMessageId > 0} 时优先原位替换该消息的内容，
+     * 这样重新生成中间某条消息不会把新内容追加到列表末尾，旋转恢复后也能接上。
+     *
+     * @param targetMessageId 被重 roll 的消息 id；普通新回复传 {@code -1}
+     */
+    public void upsertStreamRow(
+            long streamOpId,
+            String text,
+            long createdAt,
+            long targetMessageId
+    ) {
+        if (targetMessageId > 0) {
+            for (int index = 0; index < messages.size(); index++) {
+                ChatMessage message = messages.get(index);
+                if (message.getId() == targetMessageId) {
+                    messages.set(index, message.withContent(text));
+                    notifyItemChanged(index);
+                    return;
+                }
+            }
+        }
         for (int index = messages.size() - 1; index >= 0; index--) {
             ChatMessage msg = messages.get(index);
             if (msg.getId() < 0
                     && msg.getRole() == ChatMessage.Role.ASSISTANT
                     && msg.getKind() == ChatMessage.Kind.TEXT
                     && msg.getCreatedAt() == createdAt) {
-                messages.set(index, new ChatMessage(
-                        msg.getId(), msg.getRole(), msg.getKind(),
-                        msg.getTitle(), text, msg.getCreatedAt(),
-                        msg.getActionToken(), msg.getActionType(),
-                        msg.getActionState(), msg.getAttachmentPath(),
-                        msg.getAttachmentMimeType(), msg.getReplyToMessageId(),
-                        msg.getReplyPreview(), msg.getReaction()
-                ));
+                messages.set(index, msg.withContent(text));
                 notifyItemChanged(index);
                 return;
             }
@@ -180,7 +215,10 @@ public final class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.Me
                     message.getAttachmentMimeType(),
                     message.getReplyToMessageId(),
                     message.getReplyPreview(),
-                    message.getReaction()
+                    message.getReaction(),
+                    message.getSpeakerName(),
+                    message.getActiveVersion(),
+                    message.getVersionCount()
             ));
             notifyItemChanged(index);
             return;
@@ -216,13 +254,33 @@ public final class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.Me
         }
     }
 
-    public void removeMessage(long messageId) {
+    /** 移除一条消息，返回它原来的下标（未找到返回 -1）。 */
+    public int removeMessage(long messageId) {
         for (int index = 0; index < messages.size(); index++) {
             if (messages.get(index).getId() == messageId) {
                 messages.remove(index);
                 notifyItemRemoved(index);
-                return;
+                return index;
             }
+        }
+        return -1;
+    }
+
+    /**
+     * 原位刷新一条消息的内容与版本信息，保留它当前的时间戳与其他本地状态。
+     * 用于重 roll 完成后的版本计数刷新，以及左右切换版本。
+     */
+    public void refreshMessageContent(long messageId, ChatMessage updated) {
+        for (int index = 0; index < messages.size(); index++) {
+            ChatMessage message = messages.get(index);
+            if (message.getId() != messageId) {
+                continue;
+            }
+            messages.set(index, message
+                    .withContent(updated.getContent())
+                    .withVersionInfo(updated.getActiveVersion(), updated.getVersionCount()));
+            notifyItemChanged(index);
+            return;
         }
     }
 
@@ -246,7 +304,10 @@ public final class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.Me
                     message.getAttachmentMimeType(),
                     message.getReplyToMessageId(),
                     message.getReplyPreview(),
-                    reaction
+                    reaction,
+                    message.getSpeakerName(),
+                    message.getActiveVersion(),
+                    message.getVersionCount()
             ));
             notifyItemChanged(index);
             return;
@@ -313,6 +374,11 @@ public final class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.Me
                 !isUser && !speakerName.isEmpty() ? View.VISIBLE : View.GONE);
         holder.reaction.setText(message.getReaction());
         holder.reaction.setVisibility(message.hasReaction() ? View.VISIBLE : View.GONE);
+        boolean showVersionBar = !isUser && message.hasVersions();
+        holder.versionBar.setVisibility(showVersionBar ? View.VISIBLE : View.GONE);
+        if (showVersionBar) {
+            bindVersionBar(holder, message);
+        }
         holder.bubble.setBackgroundResource(
                 isUser ? R.drawable.bg_message_user : R.drawable.bg_message_assistant
         );
@@ -326,8 +392,31 @@ public final class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.Me
         ));
     }
 
-    private void bindImage(MessageViewHolder holder, ChatMessage message) {
-        String attachmentPath = message.getAttachmentPath();
+    /** 渲染「‹ 2 / 3 ›」版本翻页条；到头的一端置灰禁用。 */
+    private void bindVersionBar(MessageViewHolder holder, ChatMessage message) {
+        Context context = holder.itemView.getContext();
+        holder.versionLabel.setText(context.getString(
+                R.string.message_version_position,
+                message.getActiveVersion(),
+                message.getVersionCount()
+        ));
+        boolean hasPrevious = message.hasPreviousVersion();
+        boolean hasNext = message.hasNextVersion();
+        holder.versionPrevious.setEnabled(hasPrevious);
+        holder.versionPrevious.setAlpha(hasPrevious ? 1f : 0.3f);
+        holder.versionPrevious.setOnClickListener(hasPrevious
+                ? view -> messageVersionListener.onSwitchVersion(
+                        message, message.getActiveVersion() - 1)
+                : null);
+        holder.versionNext.setEnabled(hasNext);
+        holder.versionNext.setAlpha(hasNext ? 1f : 0.3f);
+        holder.versionNext.setOnClickListener(hasNext
+                ? view -> messageVersionListener.onSwitchVersion(
+                        message, message.getActiveVersion() + 1)
+                : null);
+    }
+
+    private void bindImage(MessageViewHolder holder, ChatMessage message) {        String attachmentPath = message.getAttachmentPath();
         holder.boundImagePath = attachmentPath;
         holder.image.setImageDrawable(null);
         holder.image.setVisibility(message.hasImageAttachment() ? View.VISIBLE : View.GONE);
@@ -378,7 +467,9 @@ public final class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.Me
                 message.getReplyToMessageId(),
                 message.getReplyPreview(),
                 message.getReaction(),
-                message.getSpeakerName()
+                message.getSpeakerName(),
+                message.getActiveVersion(),
+                message.getVersionCount()
         );
     }
 
@@ -388,6 +479,10 @@ public final class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.Me
         private final TextView replyPreview;
         private final TextView reaction;
         private final TextView speaker;
+        private final View versionBar;
+        private final TextView versionLabel;
+        private final ImageButton versionPrevious;
+        private final ImageButton versionNext;
         private final View bubble;
         private final ImageView image;
         private final View card;
@@ -406,6 +501,10 @@ public final class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.Me
             replyPreview = itemView.findViewById(R.id.messageReplyPreview);
             reaction = itemView.findViewById(R.id.messageReaction);
             speaker = itemView.findViewById(R.id.messageSpeaker);
+            versionBar = itemView.findViewById(R.id.messageVersionBar);
+            versionLabel = itemView.findViewById(R.id.messageVersionLabel);
+            versionPrevious = itemView.findViewById(R.id.messageVersionPrevious);
+            versionNext = itemView.findViewById(R.id.messageVersionNext);
             bubble = itemView.findViewById(R.id.messageBubble);
             image = itemView.findViewById(R.id.messageImage);
             card = itemView.findViewById(R.id.agentCard);

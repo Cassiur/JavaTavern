@@ -207,6 +207,24 @@ public final class ChatRepository implements AutoCloseable {
         historyStore.updateMessageContent(messageId, content);
     }
 
+    /** 读取单条消息（含版本信息）；不存在返回 null。 */
+    public ChatMessage loadMessage(long messageId) {
+        return historyStore.loadMessage(messageId);
+    }
+
+    /**
+     * 把一次重 roll 的结果追加为该消息的新版本，并让它成为当前显示版本。
+     * 旧回复会被保留，可用左右箭头翻回。
+     */
+    public void appendMessageVersion(long messageId, String content, long createdAt) {
+        historyStore.appendMessageVersion(messageId, content, createdAt);
+    }
+
+    /** 切换到指定版本（1-based），返回切换后的消息。 */
+    public ChatMessage switchMessageVersion(long messageId, int targetVersion) {
+        return historyStore.switchMessageVersion(messageId, targetVersion);
+    }
+
     public void deleteMessage(long messageId) {
         historyStore.deleteMessage(messageId);
     }

@@ -18,14 +18,23 @@ import java.util.List;
  */
 public final class ChatHistoryStore {
     private static final String TABLE_MESSAGES = TavernDatabase.TABLE_MESSAGES;
+    private static final String TABLE_MESSAGE_VERSIONS = TavernDatabase.TABLE_MESSAGE_VERSIONS;
     private static final String TABLE_AGENT_AUDIT = TavernDatabase.TABLE_AGENT_AUDIT;
     private static final String TABLE_MESSAGES_FTS = TavernDatabase.TABLE_MESSAGES_FTS;
     private static final String[] MESSAGE_COLUMNS = new String[]{
             "id", "role", "kind", "title", "content", "created_at",
             "action_token", "action_type", "action_state",
             "attachment_path", "attachment_mime_type",
-            "reply_to_message_id", "reply_preview", "reaction", "speaker_name"
+            "reply_to_message_id", "reply_preview", "reaction", "speaker_name",
+            "version_count", "active_version"
     };
+    /** 与 {@link #MESSAGE_COLUMNS} 等价的带表别名版本，供 JOIN 查询复用。 */
+    private static final String MESSAGE_COLUMNS_QUALIFIED =
+            "m.id, m.role, m.kind, m.title, m.content, m.created_at, " +
+                    "m.action_token, m.action_type, m.action_state, " +
+                    "m.attachment_path, m.attachment_mime_type, " +
+                    "m.reply_to_message_id, m.reply_preview, m.reaction, m.speaker_name, " +
+                    "m.version_count, m.active_version";
 
     private final TavernDatabase database;
 
@@ -115,11 +124,8 @@ public final class ChatHistoryStore {
         List<ChatMessage> messages = new ArrayList<>();
         String matchExpression = "\"" + normalized.replace("\"", "\"\"") + "\"";
         try (Cursor cursor = database.getReadableDatabase().rawQuery(
-                "SELECT m.id, m.role, m.kind, m.title, m.content, m.created_at, " +
-                        "m.action_token, m.action_type, m.action_state, " +
-                        "m.attachment_path, m.attachment_mime_type, " +
-                        "m.reply_to_message_id, m.reply_preview, m.reaction, m.speaker_name " +
-                        "FROM " + TABLE_MESSAGES_FTS + " f JOIN " + TABLE_MESSAGES +
+                "SELECT " + MESSAGE_COLUMNS_QUALIFIED +
+                        " FROM " + TABLE_MESSAGES_FTS + " f JOIN " + TABLE_MESSAGES +
                         " m ON m.id = CAST(f.message_id AS INTEGER) " +
                         "WHERE f.character_id = ? AND f.content MATCH ? " +
                         "ORDER BY m.id DESC LIMIT ?",
@@ -334,35 +340,208 @@ public final class ChatHistoryStore {
     }
 
     public void clearMessages(String characterId) {
-        database.getWritableDatabase().delete(
+        SQLiteDatabase writable = database.getWritableDatabase();
+        writable.beginTransaction();
+        try {
+            deleteVersionsOfCharacter(writable, characterId);
+            writable.delete(
+                    TABLE_MESSAGES,
+                    "character_id = ?",
+                    new String[]{characterId}
+            );
+            writable.setTransactionSuccessful();
+        } finally {
+            writable.endTransaction();
+        }
+    }
+
+    public ChatMessage loadMessage(long messageId) {
+        try (Cursor cursor = database.getReadableDatabase().query(
                 TABLE_MESSAGES,
-                "character_id = ?",
-                new String[]{characterId}
+                MESSAGE_COLUMNS,
+                "id = ?",
+                new String[]{Long.toString(messageId)},
+                null,
+                null,
+                null
+        )) {
+            return cursor.moveToFirst() ? readMessage(cursor) : null;
+        }
+    }
+
+    /**
+     * 追加一个重 roll 版本并使其成为当前显示版本。
+     *
+     * <p>首次调用时先把消息此刻的内容登记为第 1 版，因此旧回复不会被丢弃；
+     * {@code messages} 行本身不新增，只更新内容与版本计数，对话顺序保持稳定。
+     */
+    public void appendMessageVersion(long messageId, String content, long createdAt) {
+        SQLiteDatabase writable = database.getWritableDatabase();
+        writable.beginTransaction();
+        try {
+            ensureFirstVersion(writable, messageId);
+            ContentValues version = new ContentValues();
+            version.put("message_id", messageId);
+            version.put("content", content);
+            version.put("created_at", createdAt);
+            writable.insertOrThrow(TABLE_MESSAGE_VERSIONS, null, version);
+
+            int count = countVersions(writable, messageId);
+            ContentValues message = new ContentValues();
+            message.put("content", content);
+            message.put("version_count", count);
+            message.put("active_version", count);
+            int updated = writable.update(
+                    TABLE_MESSAGES,
+                    message,
+                    "id = ?",
+                    new String[]{Long.toString(messageId)}
+            );
+            if (updated != 1) {
+                throw new IllegalArgumentException("消息不存在");
+            }
+            writable.setTransactionSuccessful();
+        } finally {
+            writable.endTransaction();
+        }
+    }
+
+    /**
+     * 切换到指定版本（1-based），返回切换后的消息。
+     *
+     * @throws IllegalArgumentException 消息或目标版本不存在
+     */
+    public ChatMessage switchMessageVersion(long messageId, int targetVersion) {
+        SQLiteDatabase writable = database.getWritableDatabase();
+        writable.beginTransaction();
+        try {
+            ChatMessage current = loadMessage(messageId);
+            if (current == null) {
+                throw new IllegalArgumentException("消息不存在");
+            }
+            int target = Math.min(Math.max(1, targetVersion), current.getVersionCount());
+            String content = versionContent(writable, messageId, target);
+            if (content == null) {
+                throw new IllegalArgumentException("版本不存在");
+            }
+            ContentValues values = new ContentValues();
+            values.put("content", content);
+            values.put("active_version", target);
+            writable.update(
+                    TABLE_MESSAGES,
+                    values,
+                    "id = ?",
+                    new String[]{Long.toString(messageId)}
+            );
+            writable.setTransactionSuccessful();
+            return current.withContent(content).withVersionInfo(target, current.getVersionCount());
+        } finally {
+            writable.endTransaction();
+        }
+    }
+
+    /** 把消息此刻的内容登记为第 1 版；已登记过则为无操作。 */
+    private void ensureFirstVersion(SQLiteDatabase writable, long messageId) {
+        if (countVersions(writable, messageId) > 0) {
+            return;
+        }
+        try (Cursor cursor = writable.query(
+                TABLE_MESSAGES,
+                new String[]{"content", "created_at"},
+                "id = ?",
+                new String[]{Long.toString(messageId)},
+                null,
+                null,
+                null
+        )) {
+            if (!cursor.moveToFirst()) {
+                throw new IllegalArgumentException("消息不存在");
+            }
+            ContentValues first = new ContentValues();
+            first.put("message_id", messageId);
+            first.put("content", cursor.getString(0));
+            first.put("created_at", cursor.getLong(1));
+            writable.insertOrThrow(TABLE_MESSAGE_VERSIONS, null, first);
+        }
+    }
+
+    private int countVersions(SQLiteDatabase writable, long messageId) {
+        try (Cursor cursor = writable.rawQuery(
+                "SELECT COUNT(*) FROM " + TABLE_MESSAGE_VERSIONS + " WHERE message_id = ?",
+                new String[]{Long.toString(messageId)}
+        )) {
+            return cursor.moveToFirst() ? cursor.getInt(0) : 0;
+        }
+    }
+
+    /** 取第 {@code position} 版（1-based）的内容；越界返回 null。 */
+    private String versionContent(SQLiteDatabase writable, long messageId, int position) {
+        try (Cursor cursor = writable.rawQuery(
+                "SELECT content FROM " + TABLE_MESSAGE_VERSIONS +
+                        " WHERE message_id = ? ORDER BY id ASC LIMIT 1 OFFSET ?",
+                new String[]{Long.toString(messageId), Integer.toString(position - 1)}
+        )) {
+            return cursor.moveToFirst() ? cursor.getString(0) : null;
+        }
+    }
+
+    private void deleteVersionsOfCharacter(SQLiteDatabase writable, String characterId) {
+        writable.execSQL(
+                "DELETE FROM " + TABLE_MESSAGE_VERSIONS + " WHERE message_id IN (" +
+                        "SELECT id FROM " + TABLE_MESSAGES + " WHERE character_id = ?)",
+                new Object[]{characterId}
         );
     }
 
     public void updateMessageContent(long messageId, String content) {
-        ContentValues values = new ContentValues();
-        values.put("content", content);
-        int updatedRows = database.getWritableDatabase().update(
-                TABLE_MESSAGES,
-                values,
-                "id = ?",
-                new String[]{Long.toString(messageId)}
-        );
-        if (updatedRows != 1) {
-            throw new IllegalArgumentException("消息不存在");
+        SQLiteDatabase writable = database.getWritableDatabase();
+        writable.beginTransaction();
+        try {
+            ContentValues values = new ContentValues();
+            values.put("content", content);
+            int updatedRows = writable.update(
+                    TABLE_MESSAGES,
+                    values,
+                    "id = ?",
+                    new String[]{Long.toString(messageId)}
+            );
+            if (updatedRows != 1) {
+                throw new IllegalArgumentException("消息不存在");
+            }
+            // 编辑作用于当前显示的那一版，翻页离开再翻回来仍保留这次修改。
+            writable.execSQL(
+                    "UPDATE " + TABLE_MESSAGE_VERSIONS + " SET content = ? WHERE id = (" +
+                            "SELECT id FROM " + TABLE_MESSAGE_VERSIONS +
+                            " WHERE message_id = ? ORDER BY id ASC LIMIT 1 OFFSET (" +
+                            "SELECT active_version - 1 FROM " + TABLE_MESSAGES + " WHERE id = ?))",
+                    new Object[]{content, messageId, messageId}
+            );
+            writable.setTransactionSuccessful();
+        } finally {
+            writable.endTransaction();
         }
     }
 
     public void deleteMessage(long messageId) {
-        int deletedRows = database.getWritableDatabase().delete(
-                TABLE_MESSAGES,
-                "id = ?",
-                new String[]{Long.toString(messageId)}
-        );
-        if (deletedRows != 1) {
-            throw new IllegalArgumentException("消息不存在");
+        SQLiteDatabase writable = database.getWritableDatabase();
+        writable.beginTransaction();
+        try {
+            int deletedRows = writable.delete(
+                    TABLE_MESSAGES,
+                    "id = ?",
+                    new String[]{Long.toString(messageId)}
+            );
+            if (deletedRows != 1) {
+                throw new IllegalArgumentException("消息不存在");
+            }
+            writable.delete(
+                    TABLE_MESSAGE_VERSIONS,
+                    "message_id = ?",
+                    new String[]{Long.toString(messageId)}
+            );
+            writable.setTransactionSuccessful();
+        } finally {
+            writable.endTransaction();
         }
     }
 
@@ -450,6 +629,7 @@ public final class ChatHistoryStore {
                     "用户确认执行",
                     createdAt
             );
+            deleteVersionsOfCharacter(writable, characterId);
             writable.delete(
                     TABLE_MESSAGES,
                     "character_id = ?",
@@ -525,7 +705,9 @@ public final class ChatHistoryStore {
                 cursor.getLong(11),
                 cursor.getString(12),
                 cursor.getString(13),
-                cursor.getString(14)
+                cursor.getString(14),
+                cursor.getInt(15),
+                cursor.getInt(16)
         );
     }
 

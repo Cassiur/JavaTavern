@@ -133,7 +133,8 @@ public final class ChatActivity extends AppCompatActivity {
                         agentController.cancel(message);
                     }
                 },
-                message -> messageActionsController.showActions(message)
+                message -> messageActionsController.showActions(message),
+                this::switchMessageVersion
         );
 
         searchController = new ChatSearchController(
@@ -196,8 +197,18 @@ public final class ChatActivity extends AppCompatActivity {
                     }
 
                     @Override
-                    public void onRegenerate(ModelSettings settings) {
-                        startStreaming(settings);
+                    public void onRegenerate(ModelSettings settings, ChatMessage message) {
+                        if (chatViewModel.isStreaming()) {
+                            return;
+                        }
+                        // 消息本身留在列表里，流式内容会原位替换它（见 upsertStreamRow），
+                        // 因此不需要先删除旧气泡，旋转屏幕也不会错位。
+                        startStreaming(settings, message.getId());
+                    }
+
+                    @Override
+                    public void onRegenerateMockReply(String input, ChatMessage message) {
+                        regenerateWithMockReply(input, message);
                     }
 
                     @Override
@@ -327,7 +338,8 @@ public final class ChatActivity extends AppCompatActivity {
             case CONNECTING:
                 if (historyLoaded) {
                     messageAdapter.upsertStreamRow(s.operationId,
-                            getString(R.string.stream_connecting), s.createdAt);
+                            getString(R.string.stream_connecting), s.createdAt,
+                            snapshot.targetMessageId);
                     if (isNearBottom()) scrollToLatest();
                 }
                 setStreamingUi(true);
@@ -335,7 +347,7 @@ public final class ChatActivity extends AppCompatActivity {
             case STREAMING:
                 if (historyLoaded) {
                     messageAdapter.upsertStreamRow(s.operationId,
-                            snapshot.displayText, s.createdAt);
+                            snapshot.displayText, s.createdAt, snapshot.targetMessageId);
                     if (isNearBottom()) scrollToLatest();
                 }
                 setStreamingUi(true);
@@ -344,24 +356,86 @@ public final class ChatActivity extends AppCompatActivity {
             case STOPPED:
                 if (historyLoaded) {
                     messageAdapter.upsertStreamRow(s.operationId,
-                            snapshot.displayText, s.createdAt);
+                            snapshot.displayText, s.createdAt, snapshot.targetMessageId);
                     if (snapshot.rowId > 0) {
                         messageAdapter.assignPersistedId(
                                 s.createdAt, ChatMessage.Role.ASSISTANT, snapshot.rowId);
+                        if (snapshot.targetMessageId > 0) {
+                            // 重 roll 完成：回读版本计数，让「2 / 2」翻页条立刻出现。
+                            refreshVersionInfo(snapshot.targetMessageId);
+                        }
                     }
-                    scrollToLatest();
+                    if (isNearBottom()) scrollToLatest();
                 }
                 setStreamingUi(false);
                 break;
             case ERROR:
                 if (historyLoaded) {
                     messageAdapter.upsertStreamRow(s.operationId,
-                            snapshot.displayText, s.createdAt);
-                    scrollToLatest();
+                            snapshot.displayText, s.createdAt, snapshot.targetMessageId);
+                    if (isNearBottom()) scrollToLatest();
                 }
                 setStreamingUi(false);
                 break;
         }
+    }
+
+    /** 切换某条消息到指定版本（1-based），并把结果原位刷回气泡。 */
+    private void switchMessageVersion(ChatMessage message, int targetVersion) {
+        AppExecutors.get().diskIo().execute(() -> {
+            ChatMessage updated;
+            try {
+                updated = chatRepository.switchMessageVersion(message.getId(), targetVersion);
+            } catch (RuntimeException exception) {
+                mainHandler.post(() -> {
+                    if (isHostActive()) {
+                        Toast.makeText(this, R.string.message_version_switch_failed,
+                                Toast.LENGTH_SHORT).show();
+                    }
+                });
+                return;
+            }
+            mainHandler.post(() -> {
+                if (isHostActive()) {
+                    messageAdapter.refreshMessageContent(message.getId(), updated);
+                }
+            });
+        });
+    }
+
+    /** 重 roll 完成后回读该消息的版本计数，刷新气泡下方的翻页条。 */
+    private void refreshVersionInfo(long messageId) {
+        AppExecutors.get().diskIo().execute(() -> {
+            ChatMessage updated = chatRepository.loadMessage(messageId);
+            if (updated == null) {
+                return;
+            }
+            mainHandler.post(() -> {
+                if (isHostActive()) {
+                    messageAdapter.refreshMessageContent(messageId, updated);
+                }
+            });
+        });
+    }
+
+    /** 离线（未配置模型）下的重 roll：模拟回复同样作为新版本保存。 */
+    private void regenerateWithMockReply(String input, ChatMessage message) {
+        String reply = replyEngine.reply(character, input);
+        long createdAt = System.currentTimeMillis();
+        AppExecutors.get().diskIo().execute(() -> {
+            try {
+                chatRepository.appendMessageVersion(message.getId(), reply, createdAt);
+            } catch (RuntimeException exception) {
+                mainHandler.post(() -> {
+                    if (isHostActive()) {
+                        Toast.makeText(this, R.string.message_action_failed,
+                                Toast.LENGTH_SHORT).show();
+                    }
+                });
+                return;
+            }
+            refreshVersionInfo(message.getId());
+        });
     }
 
     private void loadHistory(String requestedCharacterId, TextView title) {
@@ -533,6 +607,13 @@ public final class ChatActivity extends AppCompatActivity {
     }
 
     private void startStreaming(ModelSettings settings) {
+        startStreaming(settings, -1L);
+    }
+
+    /**
+     * @param regenerateMessageId 大于 0 时表示重 roll 这条消息（结果存为它的新版本）
+     */
+    private void startStreaming(ModelSettings settings, long regenerateMessageId) {
         // 只取一个足够大的候选窗口，最终按 token 预算在请求层截断。
         List<ChatMessage> contextWindow = messageAdapter.snapshotRecentTextMessages(200);
         // 预演一次世界书激活，留作「本轮到底命中了哪些设定」的排查依据。
@@ -541,12 +622,11 @@ public final class ChatActivity extends AppCompatActivity {
                 contextWindow
         );
         String memoryPrompt = chatRepository.buildConfirmedMemoryPrompt(characterId);
-        boolean started = chatViewModel.startStreaming(
-                settings,
-                character,
-                contextWindow,
-                memoryPrompt
-        );
+        boolean started = regenerateMessageId > 0
+                ? chatViewModel.startRegeneration(
+                        settings, character, regenerateMessageId, contextWindow, memoryPrompt)
+                : chatViewModel.startStreaming(
+                        settings, character, contextWindow, memoryPrompt);
         if (!started) {
             return; // rejected — already streaming
         }

@@ -180,6 +180,11 @@
     <string name="message_updated">消息已更新</string>
     <string name="message_deleted">消息已删除</string>
     <string name="message_action_failed">操作失败，请稍后重试</string>
+    <string name="message_version_position">%1$d / %2$d</string>
+    <string name="message_version_previous">上一版</string>
+    <string name="message_version_next">下一版</string>
+    <string name="message_version_switch_failed">切换版本失败</string>
+    <string name="message_version_ready">已重新生成，可用 ‹ › 翻看 %1$d 个版本</string>
 
     <!-- Chat extraction: speaker labels, placeholders, agent action copy -->
     <string name="speaker_user">我</string>

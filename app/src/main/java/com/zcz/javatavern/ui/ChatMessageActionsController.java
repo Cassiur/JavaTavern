@@ -39,7 +39,14 @@ public final class ChatMessageActionsController {
 
         void onBeginReply(ChatMessage message);
 
-        void onRegenerate(ModelSettings settings);
+        /**
+         * 重 roll 一条已存在的消息。实现方负责把该消息从列表里换成流式气泡，
+         * 并在请求成功后把结果保存为它的新版本（旧版本保留）。
+         */
+        void onRegenerate(ModelSettings settings, ChatMessage message);
+
+        /** 未配置模型时的离线重 roll：直接把模拟回复存成该消息的新版本。 */
+        void onRegenerateMockReply(String input, ChatMessage message);
 
         void onMockReply(String input);
 
@@ -153,22 +160,17 @@ public final class ChatMessageActionsController {
                 ).show());
                 return;
             }
-            try {
-                repository.deleteMessage(message.getId());
-            } catch (RuntimeException exception) {
-                mainHandler.post(this::showMessageActionFailure);
-                return;
-            }
+            // 注意：这里不再删除原消息。重新生成的结果会作为它的新版本追加，
+            // 用户可以在气泡上左右翻回之前的任意一版。
             mainHandler.post(() -> {
-                adapter.removeMessage(message.getId());
                 ModelSettings settings = settingsStore.load();
                 if (settings.isRemoteConfigured()) {
-                    listener.onRegenerate(settings);
+                    listener.onRegenerate(settings, message);
                 } else {
                     String input = source.getContent().isEmpty()
                             ? context.getString(R.string.mock_image_input)
                             : source.getContent();
-                    listener.onMockReply(input);
+                    listener.onRegenerateMockReply(input, message);
                 }
             });
         });

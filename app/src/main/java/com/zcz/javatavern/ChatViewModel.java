@@ -48,10 +48,18 @@ public final class ChatViewModel extends AndroidViewModel {
          */
         public final long rowId;
 
-        StreamSnapshot(StreamAccumulator.State accState, String displayText, long rowId) {
+        /**
+         * 本轮流式要替换的目标消息 id（重 roll 时为该消息的 id）；普通新回复为 {@code -1}。
+         * 观察者据此把流式内容渲染到原文位置，而不是追加到列表末尾。
+         */
+        public final long targetMessageId;
+
+        StreamSnapshot(StreamAccumulator.State accState, String displayText, long rowId,
+                long targetMessageId) {
             this.accState = accState;
             this.displayText = displayText;
             this.rowId = rowId;
+            this.targetMessageId = targetMessageId;
         }
     }
 
@@ -69,6 +77,12 @@ public final class ChatViewModel extends AndroidViewModel {
      * 决定终态持久化走 {@code addMessage} 还是带 speaker 的 {@code addGroupMessage}。
      */
     private volatile CharacterProfile activeGroupSpeaker;
+
+    /**
+     * 当前请求要重 roll 的目标消息 id；新建回复为 {@code -1}。
+     * 终态持久化时会追加为该消息的一个新版本，而不是新插入一条消息。
+     */
+    private volatile long activeRegenerateMessageId = -1L;
 
     private final MutableLiveData<StreamSnapshot> streamState = new MutableLiveData<>(null);
 
@@ -118,6 +132,31 @@ public final class ChatViewModel extends AndroidViewModel {
                 settings,
                 character.getId(),
                 null,
+                -1L,
+                listener -> modelClient.streamReply(
+                        settings, character, context, memoryPrompt, listener
+                )
+        );
+    }
+
+    /**
+     * 重 roll：重新生成 {@code regenerateMessageId} 这条消息，结果作为它的新版本保存。
+     *
+     * <p>旧内容不会被删除，用户可以在气泡上左右翻回之前的版本。
+     */
+    @MainThread
+    public boolean startRegeneration(
+            @NonNull ModelSettings settings,
+            @NonNull CharacterProfile character,
+            long regenerateMessageId,
+            @NonNull List<ChatMessage> context,
+            @NonNull String memoryPrompt
+    ) {
+        return startStream(
+                settings,
+                character.getId(),
+                null,
+                regenerateMessageId,
                 listener -> modelClient.streamReply(
                         settings, character, context, memoryPrompt, listener
                 )
@@ -143,6 +182,7 @@ public final class ChatViewModel extends AndroidViewModel {
                 settings,
                 groupId,
                 speaker,
+                -1L,
                 listener -> modelClient.streamGroupReply(
                         settings, members, speaker, context, memoryPrompt, listener
                 )
@@ -159,6 +199,7 @@ public final class ChatViewModel extends AndroidViewModel {
             @NonNull ModelSettings settings,
             @NonNull String sessionCharacterId,
             CharacterProfile groupSpeaker,
+            long regenerateMessageId,
             @NonNull RequestStarter starter
     ) {
         StreamSession existing = currentSession.get();
@@ -170,6 +211,7 @@ public final class ChatViewModel extends AndroidViewModel {
         final long createdAt = System.currentTimeMillis();
         final String charId = sessionCharacterId;
         activeGroupSpeaker = groupSpeaker;
+        activeRegenerateMessageId = regenerateMessageId;
 
         final String emptyFallback = getString(R.string.stream_empty_fallback);
         final String stoppedMarker = getString(R.string.stream_stopped_marker);
@@ -186,7 +228,8 @@ public final class ChatViewModel extends AndroidViewModel {
         currentSession.set(session);
 
         streamState.setValue(new StreamSnapshot(
-                session.currentState(), getString(R.string.stream_connecting), -1L));
+                session.currentState(), getString(R.string.stream_connecting), -1L,
+                regenerateMessageId));
 
         StreamSession.ResultListener listener = buildAsyncListener(session);
 
@@ -257,25 +300,34 @@ public final class ChatViewModel extends AndroidViewModel {
             public void onTerminalText(long opId, String text, long createdAt,
                     StreamAccumulator.Status status) {
                 StreamAccumulator.State s = session.currentState();
-                streamState.setValue(new StreamSnapshot(s, text, -1L));
+                streamState.setValue(new StreamSnapshot(
+                        s, text, -1L, activeRegenerateMessageId));
 
                 if (!s.shouldPersist()) {
                     return;
                 }
                 final String cid = session.getCharacterId();
                 final CharacterProfile speaker = activeGroupSpeaker;
+                final long targetId = activeRegenerateMessageId;
                 AppExecutors.get().diskIo().execute(() -> {
-                    long rowId = speaker == null
-                            ? ownedRepository.addMessage(
-                                    cid, ChatMessage.Role.ASSISTANT, text, createdAt)
-                            : ownedRepository.addGroupMessage(
-                                    cid, ChatMessage.Role.ASSISTANT, text, createdAt,
-                                    speaker.getId(), speaker.getName());
+                    long rowId;
+                    if (speaker != null) {
+                        rowId = ownedRepository.addGroupMessage(
+                                cid, ChatMessage.Role.ASSISTANT, text, createdAt,
+                                speaker.getId(), speaker.getName());
+                    } else if (targetId > 0) {
+                        // 重 roll：内容作为新版本写回原消息，位置不变、旧版本保留。
+                        ownedRepository.appendMessageVersion(targetId, text, createdAt);
+                        rowId = targetId;
+                    } else {
+                        rowId = ownedRepository.addMessage(
+                                cid, ChatMessage.Role.ASSISTANT, text, createdAt);
+                    }
                     mainHandler.post(() -> {
                         StreamSnapshot cur = streamState.getValue();
                         if (cur != null && cur.accState.operationId == opId) {
                             streamState.setValue(new StreamSnapshot(
-                                    cur.accState, cur.displayText, rowId));
+                                    cur.accState, cur.displayText, rowId, targetId));
                         }
                     });
                 });
@@ -321,7 +373,8 @@ public final class ChatViewModel extends AndroidViewModel {
     private void publishLiveIfActive(StreamSession session) {
         StreamAccumulator.State s = session.currentState();
         if (!s.isTerminal()) {
-            streamState.setValue(new StreamSnapshot(s, s.text, -1L));
+            streamState.setValue(new StreamSnapshot(
+                    s, s.text, -1L, activeRegenerateMessageId));
         }
     }
 
