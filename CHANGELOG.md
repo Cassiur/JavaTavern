@@ -4,6 +4,30 @@ All notable changes are documented here. The project follows Semantic Versioning
 
 ## Unreleased
 
+### Added
+
+- Messages now render Markdown (bold, italics, inline code, fenced code blocks, quotes, lists) through a dependency-free parser, so roleplay `*action*` beats no longer display their asterisks.
+- Regenerated replies are kept as swipable versions: every re-roll is appended to the message instead of overwriting it, and a `‹ 2 / 3 ›` control switches between them.
+- Long conversations are trimmed by a configurable token budget (default 8000) instead of a fixed message count, so they stop failing once the model context is exceeded.
+- Long-pressing the chat title lists which world-book entries fired this turn, which keyword matched, and whether recursion pulled them in.
+
+### Changed
+
+- Release builds now use a real `signingConfig` fed from environment variables, with a documented fallback to the debug key so `assembleRelease` still works locally; CI builds and verifies the release APK instead of the debug one.
+- Filled in `proguard-rules.pro` keep rules for inflated views, reflectively created ViewModels, and enums so R8 minification is safe (release APK is 3.8 MB versus 8.6 MB for debug).
+
+### Fixed
+
+- Re-rolling a reply that is not the newest message used to delete it and append the replacement at the bottom; it now regenerates in place.
+- Group-chat streaming no longer loses output on rotation, because it runs through the same `ChatViewModel` lifecycle as private chat.
+- Regenerating no longer destroys the previous reply, so a failed re-roll cannot leave a gap in the conversation.
+- Message copies preserve speaker labels, reactions, and version info instead of silently dropping fields.
+
+### Verification
+
+- 19 JVM test classes, 151 tests, 0 failures.
+- Android lint passes with 0 errors; debug and R8-minified release APKs both build.
+
 ## 0.4.0 - 2026-09-11
 
 ### Added
