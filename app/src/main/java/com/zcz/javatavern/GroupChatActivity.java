@@ -1,8 +1,6 @@
 package com.zcz.javatavern;
 
 import android.os.Bundle;
-import android.os.Handler;
-import android.os.Looper;
 import android.widget.ArrayAdapter;
 import android.widget.EditText;
 import android.widget.Spinner;
@@ -10,6 +8,7 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.lifecycle.ViewModelProvider;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
@@ -21,32 +20,38 @@ import com.zcz.javatavern.data.SecureModelSettingsStore;
 import com.zcz.javatavern.model.CharacterProfile;
 import com.zcz.javatavern.model.ChatMessage;
 import com.zcz.javatavern.model.Group;
-import com.zcz.javatavern.network.OpenAiCompatibleClient;
 import com.zcz.javatavern.ui.MessageAdapter;
 import com.zcz.javatavern.util.AppExecutors;
 
 import java.util.ArrayList;
 import java.util.List;
 
+/**
+ * 群聊聊天页。
+ *
+ * <p>流式生命周期复用 {@link ChatViewModel}（与单聊同一套），因此旋转屏幕或切后台
+ * 再回来都不会丢流，也不再需要在这里维护一份 SSE 逻辑。本页只负责：加载群聊与成员、
+ * 选择本轮发言者、把流式快照渲染成带 speaker 标记的气泡。
+ */
 public final class GroupChatActivity extends AppCompatActivity {
     public static final String EXTRA_GROUP_ID = "group_chat_group_id";
-
-    private final Handler mainHandler = new Handler(Looper.getMainLooper());
 
     private GroupRepository groupRepository;
     private CharacterRepository characterRepository;
     private ChatRepository chatRepository;
     private SecureModelSettingsStore settingsStore;
-    private OpenAiCompatibleClient modelClient;
 
+    private ChatViewModel chatViewModel;
     private MessageAdapter messageAdapter;
     private Spinner speakerSpinner;
     private EditText messageInput;
+
     private String groupId = "";
     private List<CharacterProfile> members = List.of();
     private boolean streaming = false;
-    private long activeOperationId = 0L;
-    private OpenAiCompatibleClient.StreamCall activeStream;
+    /** 本轮请求对应的发言者与时间戳，用于渲染带 speaker 的流式气泡。 */
+    private CharacterProfile pendingSpeaker;
+    private long streamCreatedAt;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -57,7 +62,7 @@ public final class GroupChatActivity extends AppCompatActivity {
         characterRepository = new CharacterRepository(getApplicationContext());
         chatRepository = new ChatRepository(getApplicationContext());
         settingsStore = new SecureModelSettingsStore(this);
-        modelClient = new OpenAiCompatibleClient();
+        chatViewModel = new ViewModelProvider(this).get(ChatViewModel.class);
 
         groupId = getIntent().getStringExtra(EXTRA_GROUP_ID);
         if (groupId == null) {
@@ -70,7 +75,7 @@ public final class GroupChatActivity extends AppCompatActivity {
                     @Override public void onConfirm(ChatMessage message) { }
                     @Override public void onCancel(ChatMessage message) { }
                 },
-                message -> { } // MVP：群聊消息长按暂无操作
+                message -> { } // 群聊消息长按暂无操作
         );
         list.setLayoutManager(new LinearLayoutManager(this));
         list.setAdapter(messageAdapter);
@@ -81,6 +86,7 @@ public final class GroupChatActivity extends AppCompatActivity {
         findViewById(R.id.groupChatBackButton).setOnClickListener(view -> finish());
         findViewById(R.id.groupSendButton).setOnClickListener(view -> sendMessage());
 
+        chatViewModel.getStreamState().observe(this, this::applyStreamSnapshot);
         loadGroup();
     }
 
@@ -104,6 +110,13 @@ public final class GroupChatActivity extends AppCompatActivity {
                 members = loadedMembers;
                 bindSpeakerSpinner();
                 messageAdapter.replaceAll(messages);
+                // 旋转恢复后把 ViewModel 里仍在进行的流式内容重新渲染出来。
+                ChatViewModel.StreamSnapshot retained = chatViewModel.getStreamState().getValue();
+                if (retained != null) {
+                    applyStreamSnapshot(retained);
+                } else {
+                    setStreamingUi(chatViewModel.isStreaming());
+                }
             });
         });
     }
@@ -167,99 +180,60 @@ public final class GroupChatActivity extends AppCompatActivity {
         messageAdapter.add(new ChatMessage(-1, ChatMessage.Role.USER, content, createdAt));
         AppExecutors.get().diskIo().execute(() -> chatRepository.addGroupMessage(
                 groupId, ChatMessage.Role.USER, content, createdAt, "", ""));
-        messageAdapter.add(new ChatMessage(
-                -1, ChatMessage.Role.ASSISTANT, "", createdAt + 1, speaker.getName()));
-        messageInput.setText("");
-        streaming = true;
-        long operationId = ++activeOperationId;
 
-        // 只取足够大的候选窗口，最终按 token 预算在请求层截断。
+        // 先放一个空的流式气泡（带 speaker），后续由快照驱动更新。
+        streamCreatedAt = createdAt + 1;
+        pendingSpeaker = speaker;
+        messageAdapter.add(new ChatMessage(
+                -1, ChatMessage.Role.ASSISTANT, "", streamCreatedAt, speaker.getName()));
+        messageInput.setText("");
+
         List<ChatMessage> context = messageAdapter.snapshotRecentTextMessages(200);
-        StringBuilder acc = new StringBuilder();
-        activeStream = modelClient.streamGroupReply(
+        boolean started = chatViewModel.startGroupStreaming(
                 settings,
+                groupId,
                 members,
                 speaker,
                 context,
-                "",
-                new OpenAiCompatibleClient.StreamListener() {
-                    @Override public void onOpen() { }
-
-                    @Override
-                    public void onDelta(String delta) {
-                        acc.append(delta);
-                        String snapshot = acc.toString();
-                        mainHandler.post(() -> {
-                            if (!isActive(operationId)) {
-                                return;
-                            }
-                            messageAdapter.updateLast(new ChatMessage(
-                                    -1, ChatMessage.Role.ASSISTANT, snapshot,
-                                    createdAt + 1, speaker.getName()));
-                        });
-                    }
-
-                    @Override
-                    public void onComplete() {
-                        mainHandler.post(() -> {
-                            if (!isActive(operationId)) {
-                                return;
-                            }
-                            String text = acc.toString().trim();
-                            if (text.isEmpty()) {
-                                text = getString(R.string.stream_empty_fallback);
-                            }
-                            String finalText = text;
-                            messageAdapter.updateLast(new ChatMessage(
-                                    -1, ChatMessage.Role.ASSISTANT, finalText,
-                                    createdAt + 1, speaker.getName()));
-                            streaming = false;
-                            activeStream = null;
-                            AppExecutors.get().diskIo().execute(() -> {
-                                long rowId = chatRepository.addGroupMessage(
-                                        groupId, ChatMessage.Role.ASSISTANT, finalText,
-                                        createdAt + 1, speaker.getId(), speaker.getName());
-                                mainHandler.post(() -> {
-                                    if (!isFinishing() && !isDestroyed()) {
-                                        messageAdapter.assignPersistedId(
-                                                createdAt + 1, ChatMessage.Role.ASSISTANT, rowId);
-                                    }
-                                });
-                            });
-                        });
-                    }
-
-                    @Override
-                    public void onError(String errorMessage) {
-                        mainHandler.post(() -> {
-                            if (!isActive(operationId)) {
-                                return;
-                            }
-                            messageAdapter.updateLast(new ChatMessage(
-                                    -1, ChatMessage.Role.ASSISTANT,
-                                    getString(R.string.stream_error_prefix)
-                                            + (errorMessage == null ? "" : errorMessage),
-                                    createdAt + 1, speaker.getName()));
-                            streaming = false;
-                            activeStream = null;
-                        });
-                    }
-                }
+                ""
         );
+        setStreamingUi(started);
     }
 
-    private boolean isActive(long operationId) {
-        return operationId == activeOperationId && !isFinishing() && !isDestroyed();
+    private void applyStreamSnapshot(ChatViewModel.StreamSnapshot snapshot) {
+        if (snapshot == null) {
+            setStreamingUi(false);
+            return;
+        }
+        String speakerName = pendingSpeaker == null ? "" : pendingSpeaker.getName();
+        String text = snapshot.displayText;
+        ChatMessage row = new ChatMessage(
+                snapshot.rowId > 0 ? snapshot.rowId : -1,
+                ChatMessage.Role.ASSISTANT,
+                text,
+                streamCreatedAt,
+                speakerName
+        );
+        if (messageAdapter.getItemCount() == 0) {
+            messageAdapter.add(row);
+        } else {
+            messageAdapter.updateLast(row);
+        }
+        setStreamingUi(!snapshot.accState.isTerminal());
+    }
+
+    private void setStreamingUi(boolean active) {
+        streaming = active;
+        findViewById(R.id.groupSendButton).setEnabled(!active);
     }
 
     @Override
-    protected void onDestroy() {
-        activeOperationId++;
-        if (activeStream != null) {
-            activeStream.cancel();
-            activeStream = null;
+    protected void onResume() {
+        super.onResume();
+        // 回到前台时，如果 ViewModel 仍在流式中，恢复按钮状态与最近快照。
+        ChatViewModel.StreamSnapshot retained = chatViewModel.getStreamState().getValue();
+        if (retained != null) {
+            applyStreamSnapshot(retained);
         }
-        modelClient.close();
-        super.onDestroy();
     }
 }

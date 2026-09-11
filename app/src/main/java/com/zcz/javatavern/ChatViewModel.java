@@ -64,6 +64,12 @@ public final class ChatViewModel extends AndroidViewModel {
     /** One active session per request; null means idle. */
     private final AtomicReference<StreamSession> currentSession = new AtomicReference<>(null);
 
+    /**
+     * 当前请求的群聊发言者；单聊为 {@code null}。
+     * 决定终态持久化走 {@code addMessage} 还是带 speaker 的 {@code addGroupMessage}。
+     */
+    private volatile CharacterProfile activeGroupSpeaker;
+
     private final MutableLiveData<StreamSnapshot> streamState = new MutableLiveData<>(null);
 
     /**
@@ -108,6 +114,53 @@ public final class ChatViewModel extends AndroidViewModel {
             @NonNull List<ChatMessage> context,
             @NonNull String memoryPrompt
     ) {
+        return startStream(
+                settings,
+                character.getId(),
+                null,
+                listener -> modelClient.streamReply(
+                        settings, character, context, memoryPrompt, listener
+                )
+        );
+    }
+
+    /**
+     * 群聊请求：{@code groupId} 作为会话 id（历史按群存储），{@code speaker} 为本轮发言角色。
+     *
+     * <p>群聊与单聊共用同一套流式生命周期，因此旋转屏幕、切后台再回来都不会丢流，
+     * 也不再需要 Activity 自己维护一份 SSE 逻辑。
+     */
+    @MainThread
+    public boolean startGroupStreaming(
+            @NonNull ModelSettings settings,
+            @NonNull String groupId,
+            @NonNull List<CharacterProfile> members,
+            @NonNull CharacterProfile speaker,
+            @NonNull List<ChatMessage> context,
+            @NonNull String memoryPrompt
+    ) {
+        return startStream(
+                settings,
+                groupId,
+                speaker,
+                listener -> modelClient.streamGroupReply(
+                        settings, members, speaker, context, memoryPrompt, listener
+                )
+        );
+    }
+
+    /** 发起一次请求的抽象：单聊走 streamReply，群聊走 streamGroupReply。 */
+    private interface RequestStarter {
+        OpenAiCompatibleClient.StreamCall start(OpenAiCompatibleClient.StreamListener listener);
+    }
+
+    @MainThread
+    private boolean startStream(
+            @NonNull ModelSettings settings,
+            @NonNull String sessionCharacterId,
+            CharacterProfile groupSpeaker,
+            @NonNull RequestStarter starter
+    ) {
         StreamSession existing = currentSession.get();
         if (existing != null && !existing.currentState().isTerminal()) {
             return false;
@@ -115,7 +168,8 @@ public final class ChatViewModel extends AndroidViewModel {
 
         final long opId = System.nanoTime();
         final long createdAt = System.currentTimeMillis();
-        final String charId = character.getId();
+        final String charId = sessionCharacterId;
+        activeGroupSpeaker = groupSpeaker;
 
         final String emptyFallback = getString(R.string.stream_empty_fallback);
         final String stoppedMarker = getString(R.string.stream_stopped_marker);
@@ -136,8 +190,7 @@ public final class ChatViewModel extends AndroidViewModel {
 
         StreamSession.ResultListener listener = buildAsyncListener(session);
 
-        OpenAiCompatibleClient.StreamCall call = modelClient.streamReply(
-                settings, character, context, memoryPrompt,
+        OpenAiCompatibleClient.StreamCall call = starter.start(
                 new OpenAiCompatibleClient.StreamListener() {
                     @Override public void onOpen() { }
 
@@ -210,9 +263,14 @@ public final class ChatViewModel extends AndroidViewModel {
                     return;
                 }
                 final String cid = session.getCharacterId();
+                final CharacterProfile speaker = activeGroupSpeaker;
                 AppExecutors.get().diskIo().execute(() -> {
-                    long rowId = ownedRepository.addMessage(
-                            cid, ChatMessage.Role.ASSISTANT, text, createdAt);
+                    long rowId = speaker == null
+                            ? ownedRepository.addMessage(
+                                    cid, ChatMessage.Role.ASSISTANT, text, createdAt)
+                            : ownedRepository.addGroupMessage(
+                                    cid, ChatMessage.Role.ASSISTANT, text, createdAt,
+                                    speaker.getId(), speaker.getName());
                     mainHandler.post(() -> {
                         StreamSnapshot cur = streamState.getValue();
                         if (cur != null && cur.accState.operationId == opId) {
