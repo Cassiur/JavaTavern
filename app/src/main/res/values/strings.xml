@@ -34,6 +34,13 @@
     <string name="world_book_button">世界书</string>
     <string name="world_book_title">世界书</string>
     <string name="world_book_empty">暂无世界书条目，点右下角 + 新增</string>
+    <string name="world_book_activation_title">本轮世界书命中（%1$d 条）</string>
+    <string name="world_book_activation_empty">本轮没有世界书条目被命中</string>
+    <string name="world_book_activation_none_yet">还没有发起过请求，先发一条消息吧</string>
+    <string name="world_book_activation_constant">常驻</string>
+    <string name="world_book_activation_direct">关键词命中</string>
+    <string name="world_book_activation_recursive">递归命中 · 第 %1$d 轮</string>
+    <string name="world_book_activation_trimmed">未纳入（超出长度上限）</string>
     <string name="add_world_entry">新增世界书条目</string>
     <string name="edit_world_entry">编辑世界书条目</string>
     <string name="world_keywords_hint">关键词（逗号分隔）</string>

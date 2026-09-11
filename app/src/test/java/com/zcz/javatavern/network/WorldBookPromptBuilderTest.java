@@ -2,6 +2,7 @@ package com.zcz.javatavern.network;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
 import com.zcz.javatavern.model.ChatMessage;
@@ -226,5 +227,103 @@ public final class WorldBookPromptBuilderTest {
 
         assertTrue(result.getAfterChar().contains("我提到 DRAGON"));
         assertTrue(result.getAfterChar().contains("龙相关设定"));
+    }
+
+    @Test
+    public void activationRecordsTheMatchedKeyword() {
+        WorldBookEntry entry = entry("雪原", "艾琳的故乡", WorldBookEntry.POSITION_AFTER_CHAR);
+
+        WorldBookPromptBuilder.Result result = builder.build(
+                List.of(entry), List.of(msg("她来自雪原")));
+
+        assertEquals(1, result.getActivations().size());
+        WorldBookPromptBuilder.Activation activation = result.getActivations().get(0);
+        assertEquals("雪原", activation.getMatchedKeyword());
+        assertFalse(activation.isRecursive());
+        assertEquals(0, activation.getRecursionStep());
+        assertTrue(activation.isIncluded());
+        assertFalse(activation.isBeforeChar());
+        assertTrue(activation.getContentPreview().contains("艾琳的故乡"));
+    }
+
+    @Test
+    public void constantEntryIsReportedAsConstant() {
+        WorldBookEntry constant = new WorldBookEntry(
+                List.of("无关关键词"), "常驻设定", true, true);
+
+        WorldBookPromptBuilder.Result result = builder.build(
+                List.of(constant), List.of(msg("随便说点什么")));
+
+        assertEquals(1, result.getActivations().size());
+        WorldBookPromptBuilder.Activation activation = result.getActivations().get(0);
+        assertTrue(activation.isConstant());
+        assertEquals("", activation.getMatchedKeyword());
+    }
+
+    @Test
+    public void recursiveActivationRecordsStep() {
+        WorldBookEntry trigger = entry("猫", "我喜欢狗", WorldBookEntry.POSITION_AFTER_CHAR);
+        WorldBookEntry chained = entry("狗", "狗狗很忠诚", WorldBookEntry.POSITION_AFTER_CHAR);
+
+        WorldBookPromptBuilder.Result result = builder.build(
+                List.of(trigger, chained), List.of(msg("我养了一只猫")));
+
+        assertEquals(2, result.getActivations().size());
+        WorldBookPromptBuilder.Activation direct = result.getActivations().get(0);
+        WorldBookPromptBuilder.Activation viaRecursion = result.getActivations().get(1);
+        assertFalse(direct.isRecursive());
+        assertEquals(0, direct.getRecursionStep());
+        assertTrue(viaRecursion.isRecursive());
+        assertEquals(1, viaRecursion.getRecursionStep());
+        assertEquals("狗", viaRecursion.getMatchedKeyword());
+    }
+
+    @Test
+    public void inactiveEntriesAreAbsentFromActivations() {
+        WorldBookEntry hit = entry("猫", "命中了", WorldBookEntry.POSITION_AFTER_CHAR);
+        WorldBookEntry miss = entry("完全没出现的词", "不该出现", WorldBookEntry.POSITION_AFTER_CHAR);
+
+        WorldBookPromptBuilder.Result result = builder.build(
+                List.of(hit, miss), List.of(msg("我养猫")));
+
+        assertEquals(1, result.getActivations().size());
+        assertEquals("猫", result.getActivations().get(0).getMatchedKeyword());
+    }
+
+    @Test
+    public void beforeAndAfterPositionsAreDistinguished() {
+        WorldBookEntry before = entry("猫", "前置设定", WorldBookEntry.POSITION_BEFORE_CHAR);
+        WorldBookEntry after = entry("猫", "后置设定", WorldBookEntry.POSITION_AFTER_CHAR);
+
+        WorldBookPromptBuilder.Result result = builder.build(
+                List.of(before, after), List.of(msg("我养猫")));
+
+        assertEquals(2, result.getActivations().size());
+        assertTrue(result.getActivations().get(0).isBeforeChar());
+        assertFalse(result.getActivations().get(1).isBeforeChar());
+    }
+
+    @Test
+    public void activationPreviewIsTruncatedForLongContent() {
+        String longContent = "很长的设定内容".repeat(30);
+        WorldBookEntry entry = entry("猫", longContent, WorldBookEntry.POSITION_AFTER_CHAR);
+
+        WorldBookPromptBuilder.Result result = builder.build(
+                List.of(entry), List.of(msg("我养猫")));
+
+        String preview = result.getActivations().get(0).getContentPreview();
+        assertTrue(preview.length() < longContent.length());
+        assertTrue(preview.endsWith("…"));
+    }
+
+    @Test
+    public void noActivationYieldsEmptyList() {
+        WorldBookEntry entry = entry("猫", "猫咪设定", WorldBookEntry.POSITION_AFTER_CHAR);
+
+        WorldBookPromptBuilder.Result result = builder.build(
+                List.of(entry), List.of(msg("今天天气不错")));
+
+        assertNotNull(result.getActivations());
+        assertTrue(result.getActivations().isEmpty());
     }
 }

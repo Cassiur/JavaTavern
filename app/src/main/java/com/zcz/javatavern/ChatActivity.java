@@ -25,6 +25,7 @@ import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
 import com.google.android.material.button.MaterialButton;
+import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 import com.zcz.javatavern.agent.LocalAgentRouter;
 import com.zcz.javatavern.data.ChatRepository;
 import com.zcz.javatavern.data.ConversationDraftStore;
@@ -34,6 +35,7 @@ import com.zcz.javatavern.media.ImageAttachmentStore;
 import com.zcz.javatavern.model.AgentCard;
 import com.zcz.javatavern.model.CharacterProfile;
 import com.zcz.javatavern.model.ChatMessage;
+import com.zcz.javatavern.network.WorldBookPromptBuilder;
 import com.zcz.javatavern.service.MockReplyEngine;
 import com.zcz.javatavern.service.ReplyEngine;
 import com.zcz.javatavern.stream.StreamAccumulator;
@@ -43,6 +45,7 @@ import com.zcz.javatavern.ui.ChatSearchController;
 import com.zcz.javatavern.ui.MessageAdapter;
 import com.zcz.javatavern.util.AppExecutors;
 
+import java.util.ArrayList;
 import java.util.List;
 
 public final class ChatActivity extends AppCompatActivity {
@@ -80,6 +83,9 @@ public final class ChatActivity extends AppCompatActivity {
     // Stream snapshots are reconciled only after persisted history is loaded.
     private boolean historyLoaded;
     private final Runnable persistDraftRunnable = this::persistDraft;
+
+    private final WorldBookPromptBuilder worldBookPromptBuilder = new WorldBookPromptBuilder();
+    private WorldBookPromptBuilder.Result lastWorldBookResult;
     private boolean restoringDraft;
     private View offlineBanner;
     private MaterialButton offlineBannerAction;
@@ -103,6 +109,10 @@ public final class ChatActivity extends AppCompatActivity {
 
         TextView title = findViewById(R.id.chatTitle);
         title.setText(R.string.loading_character);
+        title.setOnLongClickListener(view -> {
+            showWorldBookActivations();
+            return true;
+        });
         findViewById(R.id.backButton).setOnClickListener(view -> finish());
 
         messageList = findViewById(R.id.messageList);
@@ -525,6 +535,11 @@ public final class ChatActivity extends AppCompatActivity {
     private void startStreaming(ModelSettings settings) {
         // 只取一个足够大的候选窗口，最终按 token 预算在请求层截断。
         List<ChatMessage> contextWindow = messageAdapter.snapshotRecentTextMessages(200);
+        // 预演一次世界书激活，留作「本轮到底命中了哪些设定」的排查依据。
+        lastWorldBookResult = worldBookPromptBuilder.build(
+                character.getWorldEntries(),
+                contextWindow
+        );
         String memoryPrompt = chatRepository.buildConfirmedMemoryPrompt(characterId);
         boolean started = chatViewModel.startStreaming(
                 settings,
@@ -535,6 +550,47 @@ public final class ChatActivity extends AppCompatActivity {
         if (!started) {
             return; // rejected — already streaming
         }
+    }
+
+    /** 长按标题查看本轮世界书命中详情（排查「设定为什么没生效」）。 */
+    private void showWorldBookActivations() {
+        if (lastWorldBookResult == null) {
+            Toast.makeText(this, R.string.world_book_activation_none_yet, Toast.LENGTH_SHORT).show();
+            return;
+        }
+        List<WorldBookPromptBuilder.Activation> activations = lastWorldBookResult.getActivations();
+        if (activations.isEmpty()) {
+            Toast.makeText(this, R.string.world_book_activation_empty, Toast.LENGTH_SHORT).show();
+            return;
+        }
+        List<String> lines = new ArrayList<>(activations.size());
+        for (WorldBookPromptBuilder.Activation activation : activations) {
+            lines.add(formatActivation(activation));
+        }
+        new MaterialAlertDialogBuilder(this)
+                .setTitle(getString(R.string.world_book_activation_title, activations.size()))
+                .setMessage(String.join("\n\n", lines))
+                .setPositiveButton(R.string.confirm, null)
+                .show();
+    }
+
+    private String formatActivation(WorldBookPromptBuilder.Activation activation) {
+        StringBuilder line = new StringBuilder();
+        if (activation.isConstant()) {
+            line.append(getString(R.string.world_book_activation_constant));
+        } else if (activation.isRecursive()) {
+            line.append(getString(
+                    R.string.world_book_activation_recursive, activation.getRecursionStep()));
+        } else {
+            line.append(getString(R.string.world_book_activation_direct));
+        }
+        if (!activation.getMatchedKeyword().isEmpty()) {
+            line.append(" · ").append(activation.getMatchedKeyword());
+        }
+        if (!activation.isIncluded()) {
+            line.append(" · ").append(getString(R.string.world_book_activation_trimmed));
+        }
+        return line.append('\n').append(activation.getContentPreview()).toString();
     }
 
     private void prepareImageAttachment(Uri sourceUri) {
