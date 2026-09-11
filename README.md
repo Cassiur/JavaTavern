@@ -1,6 +1,11 @@
 # JavaTavern
 
-JavaTavern is a local-first Android character chat app built with Java and XML Views. It focuses on calm mobile interaction, portable character data, explicit permissions, and understandable model configuration.
+**A local-first Android character chat app — import SillyTavern cards, connect any OpenAI-compatible model, and keep every conversation on your device.**
+
+<p align="center">
+  <img src="docs/images/home.png" alt="JavaTavern home" width="32%">
+  <img src="docs/images/chat.png" alt="JavaTavern conversation" width="32%">
+</p>
 
 ## Download
 
@@ -9,12 +14,6 @@ Download the latest Android APK from [GitHub Releases](https://github.com/Cassiu
 Preview builds currently use a development signature. Back up local data before upgrading; a future stable channel will use a dedicated release signing key.
 
 > Pre-1.0 software: keep backups before relying on it for long-running stories.
-
-## Screenshots
-
-| Home | Conversation |
-| --- | --- |
-| ![Character list](docs/images/home.png) | ![Conversation](docs/images/chat.png) |
 
 ## What works today
 
