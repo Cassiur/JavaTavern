@@ -51,6 +51,8 @@ public final class SettingsActivity extends AppCompatActivity {
     private EditText maxTokensInput;
     private EditText frequencyPenaltyInput;
     private EditText presencePenaltyInput;
+    private TextInputLayout contextTokensLayout;
+    private EditText contextTokensInput;
     private TextView connectionStatus;
     private MaterialButton testButton;
     private MaterialButton saveButton;
@@ -81,6 +83,8 @@ public final class SettingsActivity extends AppCompatActivity {
         maxTokensInput = findViewById(R.id.maxTokensInput);
         frequencyPenaltyInput = findViewById(R.id.frequencyPenaltyInput);
         presencePenaltyInput = findViewById(R.id.presencePenaltyInput);
+        contextTokensLayout = findViewById(R.id.contextTokensLayout);
+        contextTokensInput = findViewById(R.id.contextTokensInput);
         connectionStatus = findViewById(R.id.connectionStatus);
         testButton = findViewById(R.id.testConnectionButton);
         saveButton = findViewById(R.id.saveSettingsButton);
@@ -113,6 +117,7 @@ public final class SettingsActivity extends AppCompatActivity {
         bindParam(maxTokensInput, params.getMaxTokens());
         bindParam(frequencyPenaltyInput, params.getFrequencyPenalty());
         bindParam(presencePenaltyInput, params.getPresencePenalty());
+        contextTokensInput.setText(String.valueOf(settings.getContextTokens()));
 
         providerSpinner.post(() -> providerSpinner.setOnItemSelectedListener(
                 new SimpleItemSelectedListener(position -> applyPreset(presets.get(position)))
@@ -283,14 +288,37 @@ public final class SettingsActivity extends AppCompatActivity {
         if (params == null) {
             return null;
         }
+        Integer contextTokens = parseContextTokens();
+        if (contextTokens == null) {
+            return null;
+        }
         ProviderPreset preset = (ProviderPreset) providerSpinner.getSelectedItem();
         return new ModelSettings(
                 preset.getId(),
                 baseUrl,
                 model,
                 apiKeyInput.getText().toString().trim(),
-                params
+                params,
+                contextTokens
         );
+    }
+
+    /** 解析上下文预算：留空使用默认值；小于 1000 视为无效。 */
+    private Integer parseContextTokens() {
+        String raw = contextTokensInput.getText().toString().trim();
+        if (raw.isEmpty()) {
+            return ModelSettings.DEFAULT_CONTEXT_TOKENS;
+        }
+        try {
+            int value = Integer.parseInt(raw);
+            if (value >= 1000) {
+                return value;
+            }
+        } catch (NumberFormatException ignored) {
+            // 落到下面的统一报错
+        }
+        contextTokensLayout.setError(getString(R.string.param_context_tokens_invalid));
+        return null;
     }
 
     private void clearParamErrors() {
@@ -299,6 +327,7 @@ public final class SettingsActivity extends AppCompatActivity {
         maxTokensLayout.setError(null);
         frequencyPenaltyLayout.setError(null);
         presencePenaltyLayout.setError(null);
+        contextTokensLayout.setError(null);
     }
 
     private void bindParam(EditText input, Number value) {

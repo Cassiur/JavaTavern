@@ -73,4 +73,65 @@ public final class ConversationWindowTest {
                 createdAt
         );
     }
+
+    @Test
+    public void generousBudgetKeepsEverythingUsable() {
+        List<ChatMessage> messages = Arrays.asList(
+                text(ChatMessage.Role.USER, "第一句", 1),
+                text(ChatMessage.Role.ASSISTANT, "第二句", 2),
+                text(ChatMessage.Role.USER, "第三句", 3)
+        );
+
+        List<ChatMessage> selected = ConversationWindow.selectWithinTokenBudget(messages, 10_000);
+
+        assertEquals(3, selected.size());
+        assertEquals("第一句", selected.get(0).getContent());
+    }
+
+    @Test
+    public void tightBudgetKeepsOnlyTheMostRecentMessages() {
+        List<ChatMessage> messages = Arrays.asList(
+                text(ChatMessage.Role.USER, "这是一段很长的历史消息，用来消耗预算。", 1),
+                text(ChatMessage.Role.ASSISTANT, "这是另一段同样很长的历史回复内容。", 2),
+                text(ChatMessage.Role.USER, "最新", 3)
+        );
+
+        List<ChatMessage> selected = ConversationWindow.selectWithinTokenBudget(messages, 8);
+
+        assertEquals(1, selected.size());
+        assertEquals("最新", selected.get(0).getContent());
+    }
+
+    @Test
+    public void alwaysKeepsAtLeastTheLatestMessage() {
+        List<ChatMessage> messages = Arrays.asList(
+                text(ChatMessage.Role.USER, "一条远超预算的超长消息内容", 1)
+        );
+
+        List<ChatMessage> selected = ConversationWindow.selectWithinTokenBudget(messages, 1);
+
+        assertEquals(1, selected.size());
+    }
+
+    @Test
+    public void zeroOrNegativeBudgetReturnsEmpty() {
+        List<ChatMessage> messages = Arrays.asList(text(ChatMessage.Role.USER, "hi", 1));
+        assertEquals(0, ConversationWindow.selectWithinTokenBudget(messages, 0).size());
+        assertEquals(0, ConversationWindow.selectWithinTokenBudget(messages, -5).size());
+        assertEquals(0, ConversationWindow.selectWithinTokenBudget(List.of(), 100).size());
+    }
+
+    @Test
+    public void budgetSelectionSkipsCardsAndEmptyMessages() {
+        List<ChatMessage> messages = Arrays.asList(
+                card("agent card", 1),
+                new ChatMessage(-1, ChatMessage.Role.USER, "   ", 2),
+                text(ChatMessage.Role.USER, "有效内容", 3)
+        );
+
+        List<ChatMessage> selected = ConversationWindow.selectWithinTokenBudget(messages, 100);
+
+        assertEquals(1, selected.size());
+        assertEquals("有效内容", selected.get(0).getContent());
+    }
 }

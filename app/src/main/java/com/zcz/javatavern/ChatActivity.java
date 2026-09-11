@@ -523,7 +523,8 @@ public final class ChatActivity extends AppCompatActivity {
     }
 
     private void startStreaming(ModelSettings settings) {
-        List<ChatMessage> contextWindow = messageAdapter.snapshotRecentTextMessages(20);
+        // 只取一个足够大的候选窗口，最终按 token 预算在请求层截断。
+        List<ChatMessage> contextWindow = messageAdapter.snapshotRecentTextMessages(200);
         String memoryPrompt = chatRepository.buildConfirmedMemoryPrompt(characterId);
         boolean started = chatViewModel.startStreaming(
                 settings,

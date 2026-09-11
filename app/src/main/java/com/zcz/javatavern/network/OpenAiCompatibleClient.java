@@ -183,7 +183,11 @@ public final class OpenAiCompatibleClient implements AutoCloseable {
         messages.put(new JSONObject()
                 .put("role", "system")
                 .put("content", systemPrompt));
-        for (ChatMessage message : conversation) {
+        // 按 token 预算截断历史：先扣掉 system prompt（角色卡、世界书、长期记忆）
+        // 占用的额度，再取最近的消息。这样长对话不会因为超出模型上下文而直接失败。
+        int messageBudget = settings.getContextTokens() - TokenEstimator.estimate(systemPrompt);
+        for (ChatMessage message : ConversationWindow.selectWithinTokenBudget(
+                conversation, messageBudget)) {
             messages.put(new JSONObject()
                     .put(
                             "role",

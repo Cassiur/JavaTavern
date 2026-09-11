@@ -25,6 +25,7 @@ public final class SecureModelSettingsStore {
     private static final String KEY_MAX_TOKENS = "gen_max_tokens";
     private static final String KEY_FREQUENCY_PENALTY = "gen_frequency_penalty";
     private static final String KEY_PRESENCE_PENALTY = "gen_presence_penalty";
+    private static final String KEY_CONTEXT_TOKENS = "context_tokens";
     private static final String KEYSTORE_PROVIDER = "AndroidKeyStore";
     private static final String KEY_ALIAS = "java_tavern_model_key";
     private static final String TRANSFORMATION = "AES/GCM/NoPadding";
@@ -41,7 +42,8 @@ public final class SecureModelSettingsStore {
                 preferences.getString(KEY_BASE_URL, "https://api.openai.com/v1"),
                 preferences.getString(KEY_MODEL, ""),
                 decrypt(preferences.getString(KEY_API_KEY, "")),
-                loadGenerationParams()
+                loadGenerationParams(),
+                preferences.getInt(KEY_CONTEXT_TOKENS, ModelSettings.DEFAULT_CONTEXT_TOKENS)
         );
     }
 
@@ -94,6 +96,7 @@ public final class SecureModelSettingsStore {
         writeNullableInt(editor, KEY_MAX_TOKENS, params.getMaxTokens());
         writeNullableDouble(editor, KEY_FREQUENCY_PENALTY, params.getFrequencyPenalty());
         writeNullableDouble(editor, KEY_PRESENCE_PENALTY, params.getPresencePenalty());
+        editor.putInt(KEY_CONTEXT_TOKENS, settings.getContextTokens());
         editor.apply();
     }
 

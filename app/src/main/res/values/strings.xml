@@ -123,6 +123,9 @@
     <string name="param_invalid_number">%1$s 不是有效数字</string>
     <string name="param_out_of_range">%1$s 需在 %2$s 到 %3$s 之间</string>
     <string name="param_max_tokens_invalid">Max Tokens 需为正整数</string>
+    <string name="param_context_tokens">上下文预算（token）</string>
+    <string name="param_context_tokens_help">本地截断参数，不会发送给服务端。对话超出预算时只发送最近的部分，避免长对话直接请求失败。留空使用默认 8000。</string>
+    <string name="param_context_tokens_invalid">上下文预算需为不小于 1000 的正整数</string>
     <string name="generation_presets">生成预设</string>
     <string name="generation_presets_desc">预设是采样参数的命名快照。把当前参数保存为预设，或一键应用已有预设。</string>
     <string name="apply_preset">应用</string>

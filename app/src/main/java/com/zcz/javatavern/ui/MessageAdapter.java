@@ -276,7 +276,8 @@ public final class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.Me
         if (isCard) {
             holder.itemView.setOnLongClickListener(null);
             holder.cardTitle.setText(message.getTitle());
-            holder.cardBody.setText(message.getContent());
+            holder.cardBody.setText(MarkdownRenderer.render(
+                    holder.itemView.getContext(), message.getContent()));
             holder.cardBadge.setText(badgeFor(message));
             boolean canConfirm = message.getKind() == ChatMessage.Kind.AGENT_PROPOSAL
                     && message.getActionState() == ChatMessage.ActionState.PENDING;
@@ -303,7 +304,8 @@ public final class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.Me
         bindImage(holder, message);
         holder.replyPreview.setText(message.getReplyPreview());
         holder.replyPreview.setVisibility(message.hasReply() ? View.VISIBLE : View.GONE);
-        holder.content.setText(message.getContent());
+        holder.content.setText(MarkdownRenderer.render(
+                holder.itemView.getContext(), message.getContent()));
         holder.content.setVisibility(message.getContent().isEmpty() ? View.GONE : View.VISIBLE);
         String speakerName = message.getSpeakerName();
         holder.speaker.setText(speakerName);

@@ -173,7 +173,8 @@ public final class GroupChatActivity extends AppCompatActivity {
         streaming = true;
         long operationId = ++activeOperationId;
 
-        List<ChatMessage> context = messageAdapter.snapshotRecentTextMessages(20);
+        // 只取足够大的候选窗口，最终按 token 预算在请求层截断。
+        List<ChatMessage> context = messageAdapter.snapshotRecentTextMessages(200);
         StringBuilder acc = new StringBuilder();
         activeStream = modelClient.streamGroupReply(
                 settings,
