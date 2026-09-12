@@ -10,7 +10,9 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 public final class LongTermMemoryStore {
@@ -75,7 +77,30 @@ public final class LongTermMemoryStore {
         return MemoryPromptFormatter.format(load(characterId), PROMPT_CHARACTER_LIMIT);
     }
 
+    /** 全部角色的记忆，按角色 id 分组（备份导出用）。 */
+    public synchronized Map<String, List<MemoryEntry>> loadAll() {
+        Map<String, List<MemoryEntry>> result = new LinkedHashMap<>();
+        // 先复制 key 集合：load() 遇到损坏条目会顺手删除，边遍历边改会抛异常。
+        for (String characterId : new ArrayList<>(preferences.getAll().keySet())) {
+            result.put(characterId, load(characterId));
+        }
+        return result;
+    }
+
+    /** 整体替换全部角色的记忆（备份恢复用）。 */
+    public synchronized void replaceAll(Map<String, List<MemoryEntry>> memoriesByCharacter) {
+        SharedPreferences.Editor editor = preferences.edit().clear();
+        for (Map.Entry<String, List<MemoryEntry>> entry : memoriesByCharacter.entrySet()) {
+            editor.putString(entry.getKey(), serialize(entry.getValue()));
+        }
+        editor.apply();
+    }
+
     private void save(String characterId, List<MemoryEntry> entries) {
+        preferences.edit().putString(characterId, serialize(entries)).apply();
+    }
+
+    private static String serialize(List<MemoryEntry> entries) {
         JSONArray array = new JSONArray();
         for (MemoryEntry entry : entries) {
             try {
@@ -87,6 +112,6 @@ public final class LongTermMemoryStore {
                 throw new IllegalStateException("无法保存记忆", exception);
             }
         }
-        preferences.edit().putString(characterId, array.toString()).apply();
+        return array.toString();
     }
 }

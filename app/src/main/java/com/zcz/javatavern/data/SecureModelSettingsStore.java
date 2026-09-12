@@ -6,6 +6,9 @@ import android.security.keystore.KeyGenParameterSpec;
 import android.security.keystore.KeyProperties;
 import android.util.Base64;
 
+import org.json.JSONException;
+import org.json.JSONObject;
+
 import java.nio.charset.StandardCharsets;
 import java.security.KeyStore;
 
@@ -26,6 +29,18 @@ public final class SecureModelSettingsStore {
     private static final String KEY_FREQUENCY_PENALTY = "gen_frequency_penalty";
     private static final String KEY_PRESENCE_PENALTY = "gen_presence_penalty";
     private static final String KEY_CONTEXT_TOKENS = "context_tokens";
+
+    // 备份里用的键名（与内部存储键解耦，避免以后改存储键破坏旧备份的兼容性）。
+    private static final String KEY_EXPORT_PROVIDER_ID = "providerId";
+    private static final String KEY_EXPORT_BASE_URL = "baseUrl";
+    private static final String KEY_EXPORT_MODEL = "model";
+    private static final String KEY_EXPORT_CONTEXT_TOKENS = "contextTokens";
+    private static final String KEY_EXPORT_TEMPERATURE = "temperature";
+    private static final String KEY_EXPORT_TOP_P = "topP";
+    private static final String KEY_EXPORT_MAX_TOKENS = "maxTokens";
+    private static final String KEY_EXPORT_FREQUENCY_PENALTY = "frequencyPenalty";
+    private static final String KEY_EXPORT_PRESENCE_PENALTY = "presencePenalty";
+
     private static final String KEYSTORE_PROVIDER = "AndroidKeyStore";
     private static final String KEY_ALIAS = "java_tavern_model_key";
     private static final String TRANSFORMATION = "AES/GCM/NoPadding";
@@ -113,6 +128,102 @@ public final class SecureModelSettingsStore {
             editor.remove(key);
         } else {
             editor.putInt(key, value);
+        }
+    }
+
+    /**
+     * 导出连接与采样配置。
+     *
+     * <p><b>刻意不含 API Key</b>：密钥由 Android Keystore 加密且与本机绑定，
+     * 放进可以随手分享的备份文件里，既在别的设备解不开，也没有任何加密收益。
+     */
+    public JSONObject exportConnectionSettings() {
+        JSONObject result = new JSONObject();
+        try {
+            result.put(KEY_EXPORT_PROVIDER_ID,
+                    preferences.getString(KEY_PROVIDER_ID, ProviderCatalog.CUSTOM_ID));
+            result.put(KEY_EXPORT_BASE_URL, preferences.getString(KEY_BASE_URL, ""));
+            result.put(KEY_EXPORT_MODEL, preferences.getString(KEY_MODEL, ""));
+            result.put(KEY_EXPORT_CONTEXT_TOKENS, preferences.getInt(
+                    KEY_CONTEXT_TOKENS, ModelSettings.DEFAULT_CONTEXT_TOKENS));
+            putNullable(result, KEY_EXPORT_TEMPERATURE, readDouble(KEY_TEMPERATURE));
+            putNullable(result, KEY_EXPORT_TOP_P, readDouble(KEY_TOP_P));
+            putNullable(result, KEY_EXPORT_MAX_TOKENS, readInt(KEY_MAX_TOKENS));
+            putNullable(result, KEY_EXPORT_FREQUENCY_PENALTY, readDouble(KEY_FREQUENCY_PENALTY));
+            putNullable(result, KEY_EXPORT_PRESENCE_PENALTY, readDouble(KEY_PRESENCE_PENALTY));
+        } catch (JSONException exception) {
+            throw new IllegalStateException("无法导出模型配置", exception);
+        }
+        return result;
+    }
+
+    /**
+     * 恢复连接与采样配置，但**原样保留已保存的 API Key**：备份里没有密钥，
+     * 也不应该因为一次数据恢复把用户已经配好的密钥抹掉。
+     *
+     * <p>这里直接写字段而不是复用 {@link #save}，就是为了避免「解密失败拿到空串
+     * 再加密写回」把密钥覆盖掉。
+     */
+    public void restoreConnectionSettings(JSONObject settings) {
+        if (settings == null || settings.length() == 0) {
+            return;
+        }
+        String baseUrl = settings.optString(KEY_EXPORT_BASE_URL, "");
+        String model = settings.optString(KEY_EXPORT_MODEL, "");
+        if (baseUrl.isEmpty() && model.isEmpty()) {
+            return; // 备份里没带连接配置，保持本机现状
+        }
+        SharedPreferences.Editor editor = preferences.edit()
+                .putString(KEY_PROVIDER_ID, settings.optString(
+                        KEY_EXPORT_PROVIDER_ID, ProviderCatalog.CUSTOM_ID))
+                .putString(KEY_BASE_URL, baseUrl)
+                .putString(KEY_MODEL, model)
+                .putString(KEY_API_KEY, preferences.getString(KEY_API_KEY, ""));
+        writeNullableDouble(editor, KEY_TEMPERATURE,
+                optDouble(settings, KEY_EXPORT_TEMPERATURE));
+        writeNullableDouble(editor, KEY_TOP_P, optDouble(settings, KEY_EXPORT_TOP_P));
+        writeNullableInt(editor, KEY_MAX_TOKENS, optInt(settings, KEY_EXPORT_MAX_TOKENS));
+        writeNullableDouble(editor, KEY_FREQUENCY_PENALTY,
+                optDouble(settings, KEY_EXPORT_FREQUENCY_PENALTY));
+        writeNullableDouble(editor, KEY_PRESENCE_PENALTY,
+                optDouble(settings, KEY_EXPORT_PRESENCE_PENALTY));
+        editor.putInt(KEY_CONTEXT_TOKENS, settings.optInt(
+                KEY_EXPORT_CONTEXT_TOKENS, ModelSettings.DEFAULT_CONTEXT_TOKENS));
+        editor.apply();
+    }
+
+    private static void putNullable(JSONObject target, String key, Object value)
+            throws JSONException {
+        target.put(key, value == null ? JSONObject.NULL : value);
+    }
+
+    private static Double optDouble(JSONObject source, String key) {
+        Object value = source.opt(key);
+        if (value == null || JSONObject.NULL.equals(value)) {
+            return null;
+        }
+        if (value instanceof Number) {
+            return ((Number) value).doubleValue();
+        }
+        try {
+            return Double.parseDouble(String.valueOf(value));
+        } catch (NumberFormatException exception) {
+            return null;
+        }
+    }
+
+    private static Integer optInt(JSONObject source, String key) {
+        Object value = source.opt(key);
+        if (value == null || JSONObject.NULL.equals(value)) {
+            return null;
+        }
+        if (value instanceof Number) {
+            return ((Number) value).intValue();
+        }
+        try {
+            return Integer.parseInt(String.valueOf(value));
+        } catch (NumberFormatException exception) {
+            return null;
         }
     }
 

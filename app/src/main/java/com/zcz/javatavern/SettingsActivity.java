@@ -17,6 +17,7 @@ import androidx.core.content.ContextCompat;
 import com.google.android.material.button.MaterialButton;
 import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 import com.google.android.material.textfield.TextInputLayout;
+import com.zcz.javatavern.data.BackupRepository;
 import com.zcz.javatavern.data.GenerationParams;
 import com.zcz.javatavern.data.GenerationPreset;
 import com.zcz.javatavern.data.ModelSettings;
@@ -26,6 +27,7 @@ import com.zcz.javatavern.data.ProviderPreset;
 import com.zcz.javatavern.data.SecureModelSettingsStore;
 import com.zcz.javatavern.network.ConnectionTestResult;
 import com.zcz.javatavern.network.ModelConnectionTester;
+import com.zcz.javatavern.ui.BackupController;
 import com.zcz.javatavern.util.AppExecutors;
 
 import java.net.URI;
@@ -60,6 +62,9 @@ public final class SettingsActivity extends AppCompatActivity {
     private Spinner presetSpinner;
     private PresetRepository presetRepository;
     private List<GenerationPreset> generationPresets = List.of();
+    private BackupController backupController;
+    /** 保存下来以便重新绑定页面时临时摘掉，避免 setSelection 覆盖刚恢复的值。 */
+    private SimpleItemSelectedListener providerSelectedListener;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -119,8 +124,10 @@ public final class SettingsActivity extends AppCompatActivity {
         bindParam(presencePenaltyInput, params.getPresencePenalty());
         contextTokensInput.setText(String.valueOf(settings.getContextTokens()));
 
+        providerSelectedListener = new SimpleItemSelectedListener(
+                position -> applyPreset(presets.get(position)));
         providerSpinner.post(() -> providerSpinner.setOnItemSelectedListener(
-                new SimpleItemSelectedListener(position -> applyPreset(presets.get(position)))
+                providerSelectedListener
         ));
         findViewById(R.id.settingsBackButton).setOnClickListener(view -> finish());
         testButton.setOnClickListener(view -> testConnection());
@@ -129,6 +136,58 @@ public final class SettingsActivity extends AppCompatActivity {
         findViewById(R.id.savePresetButton).setOnClickListener(view -> saveAsPreset());
         findViewById(R.id.deletePresetButton).setOnClickListener(view -> deleteSelectedPreset());
         refreshPresetSpinner();
+
+        backupController = new BackupController(
+                this,
+                new BackupRepository(this),
+                new BackupController.Listener() {
+                    @Override
+                    public boolean isHostActive() {
+                        return !isFinishing() && !isDestroyed();
+                    }
+
+                    @Override
+                    public void onRestored() {
+                        bindSettingsFromStore();
+                        refreshPresetSpinner();
+                    }
+                }
+        );
+        findViewById(R.id.exportBackupButton).setOnClickListener(
+                view -> backupController.exportBackup());
+        findViewById(R.id.restoreBackupButton).setOnClickListener(
+                view -> backupController.restoreBackup());
+    }
+
+    /**
+     * 把已保存的配置回填到表单。
+     *
+     * <p>重新绑定时会先摘掉服务商下拉框的监听：{@code setSelection} 会触发
+     * {@link #applyPreset}，而那个方法会清空/覆盖 Base URL 与模型名，正好把刚恢复的值抹掉。
+     */
+    private void bindSettingsFromStore() {
+        providerSpinner.setOnItemSelectedListener(null);
+        ModelSettings settings = settingsStore.load();
+        ProviderPreset selectedPreset = ProviderCatalog.findById(settings.getProviderId());
+        if (ProviderCatalog.CUSTOM_ID.equals(selectedPreset.getId())) {
+            selectedPreset = ProviderCatalog.matchBaseUrl(settings.getBaseUrl());
+        }
+        providerSpinner.setSelection(ProviderCatalog.indexOf(selectedPreset.getId()));
+        baseUrlInput.setText(settings.getBaseUrl());
+        modelInput.setText(settings.getModel());
+        modelInput.setHint(selectedPreset.getModelHint());
+        apiKeyInput.setText(settings.getApiKey());
+        GenerationParams params = settings.getGenerationParams();
+        bindParam(temperatureInput, params.getTemperature());
+        bindParam(topPInput, params.getTopP());
+        bindParam(maxTokensInput, params.getMaxTokens());
+        bindParam(frequencyPenaltyInput, params.getFrequencyPenalty());
+        bindParam(presencePenaltyInput, params.getPresencePenalty());
+        contextTokensInput.setText(String.valueOf(settings.getContextTokens()));
+        clearParamErrors();
+        providerSpinner.post(() -> providerSpinner.setOnItemSelectedListener(
+                providerSelectedListener
+        ));
     }
 
     private void applyPreset(ProviderPreset preset) {
