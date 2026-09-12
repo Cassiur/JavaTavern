@@ -2,7 +2,7 @@
 
 All notable changes are documented here. The project follows Semantic Versioning after `1.0.0`.
 
-## Unreleased
+## 0.4.1 - 2026-09-12
 
 ### Added
 
@@ -10,6 +10,7 @@ All notable changes are documented here. The project follows Semantic Versioning
 - Regenerated replies are kept as swipable versions: every re-roll is appended to the message instead of overwriting it, and a `‹ 2 / 3 ›` control switches between them.
 - Long conversations are trimmed by a configurable token budget (default 8000) instead of a fixed message count, so they stop failing once the model context is exceeded.
 - Long-pressing the chat title lists which world-book entries fired this turn, which keyword matched, and whether recursion pulled them in.
+- Full backup & restore as a shareable ZIP: characters, chats (including every re-roll version), world books, groups, presets, memories, drafts, and avatar/image files. Restore is an all-or-nothing transaction that rewrites file paths to the new device and prunes orphaned images; API keys are deliberately excluded because Keystore encryption is device-bound.
 
 ### Changed
 
@@ -25,7 +26,8 @@ All notable changes are documented here. The project follows Semantic Versioning
 
 ### Verification
 
-- 19 JVM test classes, 151 tests, 0 failures.
+- 23 JVM test classes, 166 tests, 0 failures.
+- Backup/restore semantics verified by a scripted full round-trip (export → wipe → restore → re-roll) covering table fidelity, re-roll version history, FTS search, AUTOINCREMENT sequencing, and cross-device path rewriting.
 - Android lint passes with 0 errors; debug and R8-minified release APKs both build.
 
 ## 0.4.0 - 2026-09-11
