@@ -56,6 +56,32 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
+
+    testOptions {
+        unitTests {
+            isIncludeAndroidResources = true
+        }
+    }
+}
+
+/**
+ * Robolectric's newer Android-15/16 shadows (`ApplicationSharedMemory`) reach
+ * into JDK-internal reflection that JPMS blocks by default on JDK 17+. These
+ * flags only affect the JVM unit-test worker process, never the shipped app.
+ */
+tasks.withType<Test>().configureEach {
+    jvmArgs(
+        "--add-opens=java.base/java.lang=ALL-UNNAMED",
+        "--add-opens=java.base/java.util=ALL-UNNAMED",
+        "--add-opens=java.base/java.io=ALL-UNNAMED",
+        "--add-opens=java.base/java.security=ALL-UNNAMED",
+        "--add-opens=java.base/java.text=ALL-UNNAMED",
+        "--add-opens=java.base/java.util.concurrent=ALL-UNNAMED",
+        "--add-opens=java.base/java.util.concurrent.atomic=ALL-UNNAMED",
+        "--add-opens=java.base/sun.security.x509=ALL-UNNAMED",
+        "--add-opens=java.base/jdk.internal.access=ALL-UNNAMED",
+        "--add-exports=java.base/jdk.internal.access=ALL-UNNAMED"
+    )
 }
 
 dependencies {
@@ -67,4 +93,10 @@ dependencies {
     implementation("androidx.activity:activity:1.9.3")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20240303")
+    // JVM-local Android framework shadows for the persistence layer
+    // (TavernDatabase / ChatHistoryStore / BackupRepository), which need a
+    // real android.database.sqlite implementation that plain JUnit can't
+    // provide. No emulator or device required.
+    testImplementation("org.robolectric:robolectric:4.17")
+    testImplementation("androidx.test:core:1.7.0")
 }

@@ -54,6 +54,20 @@ public final class TavernDatabase extends SQLiteOpenHelper {
         return current;
     }
 
+    /**
+     * Test-only: clears the process-wide singleton so the next {@link #get}
+     * opens a fresh helper. Production code never calls this; it exists so
+     * Robolectric tests (which get a new {@code Context}/app-data directory
+     * per test) don't silently reuse a helper bound to a previous test's
+     * already-deleted database file.
+     */
+    static synchronized void resetSingletonForTest() {
+        if (instance != null) {
+            instance.close();
+            instance = null;
+        }
+    }
+
     private TavernDatabase(Context context) {
         super(context, DATABASE_NAME, null, DATABASE_VERSION);
         this.context = context;
