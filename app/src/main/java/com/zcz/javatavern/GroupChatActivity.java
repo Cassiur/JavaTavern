@@ -12,6 +12,7 @@ import androidx.lifecycle.ViewModelProvider;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
+import com.google.android.material.button.MaterialButton;
 import com.zcz.javatavern.data.CharacterRepository;
 import com.zcz.javatavern.data.ChatRepository;
 import com.zcz.javatavern.data.GroupRepository;
@@ -45,6 +46,7 @@ public final class GroupChatActivity extends AppCompatActivity {
     private MessageAdapter messageAdapter;
     private Spinner speakerSpinner;
     private EditText messageInput;
+    private MaterialButton sendButton;
 
     private String groupId = "";
     private List<CharacterProfile> members = List.of();
@@ -82,9 +84,10 @@ public final class GroupChatActivity extends AppCompatActivity {
 
         speakerSpinner = findViewById(R.id.groupSpeakerSpinner);
         messageInput = findViewById(R.id.groupMessageInput);
+        sendButton = findViewById(R.id.groupSendButton);
 
         findViewById(R.id.groupChatBackButton).setOnClickListener(view -> finish());
-        findViewById(R.id.groupSendButton).setOnClickListener(view -> sendMessage());
+        sendButton.setOnClickListener(view -> handlePrimaryAction());
 
         chatViewModel.getStreamState().observe(this, this::applyStreamSnapshot);
         loadGroup();
@@ -157,6 +160,14 @@ public final class GroupChatActivity extends AppCompatActivity {
         return members.get(index);
     }
 
+    private void handlePrimaryAction() {
+        if (chatViewModel.isStreaming()) {
+            chatViewModel.stopStreaming();
+            return;
+        }
+        sendMessage();
+    }
+
     private void sendMessage() {
         if (streaming) {
             return;
@@ -224,7 +235,7 @@ public final class GroupChatActivity extends AppCompatActivity {
 
     private void setStreamingUi(boolean active) {
         streaming = active;
-        findViewById(R.id.groupSendButton).setEnabled(!active);
+        sendButton.setText(active ? R.string.stop : R.string.send);
     }
 
     @Override
