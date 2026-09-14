@@ -34,4 +34,22 @@ public final class SseEventParserTest {
         assertFalse(event.isDone());
         assertEquals("", event.getDelta());
     }
+
+    @Test
+    public void skipsMalformedJsonInsteadOfThrowing() {
+        SseEventParser.Event event = SseEventParser.parse(
+                "data: {\"choices\":[{\"delta\":{\"content\":\"trunc"
+        );
+
+        assertFalse(event.isDone());
+        assertEquals("", event.getDelta());
+    }
+
+    @Test
+    public void skipsNonJsonCommentLikeDataPayload() {
+        SseEventParser.Event event = SseEventParser.parse("data: keep-alive");
+
+        assertFalse(event.isDone());
+        assertEquals("", event.getDelta());
+    }
 }

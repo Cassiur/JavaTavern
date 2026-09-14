@@ -23,23 +23,35 @@ public final class SseEventParser {
         }
     }
 
+    private static final Event EMPTY = new Event(false, "");
+
     private SseEventParser() {
     }
 
-    public static Event parse(String line) throws JSONException {
+    /**
+     * Never throws: a line that is not valid JSON (a truncated chunk, a
+     * non-conforming proxy's keep-alive/comment frame, ...) is treated as
+     * noise and skipped, so one bad line does not abort an otherwise
+     * in-progress reply.
+     */
+    public static Event parse(String line) {
         if (line == null || !line.startsWith("data:")) {
-            return new Event(false, "");
+            return EMPTY;
         }
         String data = line.substring(5).trim();
         if (data.equals("[DONE]")) {
             return new Event(true, "");
         }
-        JSONObject root = new JSONObject(data);
-        JSONArray choices = root.optJSONArray("choices");
-        if (choices == null || choices.length() == 0) {
-            return new Event(false, "");
+        try {
+            JSONObject root = new JSONObject(data);
+            JSONArray choices = root.optJSONArray("choices");
+            if (choices == null || choices.length() == 0) {
+                return EMPTY;
+            }
+            JSONObject delta = choices.getJSONObject(0).optJSONObject("delta");
+            return new Event(false, delta == null ? "" : delta.optString("content", ""));
+        } catch (JSONException malformed) {
+            return EMPTY;
         }
-        JSONObject delta = choices.getJSONObject(0).optJSONObject("delta");
-        return new Event(false, delta == null ? "" : delta.optString("content", ""));
     }
 }
