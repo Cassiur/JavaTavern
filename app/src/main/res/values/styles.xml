@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="ShapeAppearanceCircular" parent="ShapeAppearance.MaterialComponents">
+    <style name="ShapeAppearanceAvatar" parent="ShapeAppearance.MaterialComponents">
         <item name="cornerFamily">rounded</item>
-        <item name="cornerSize">50%</item>
+        <item name="cornerSize">12dp</item>
     </style>
 
     <style name="Widget.JavaTavern.CharacterTag" parent="">

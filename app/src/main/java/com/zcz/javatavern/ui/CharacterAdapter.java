@@ -30,6 +30,11 @@ public final class CharacterAdapter extends RecyclerView.Adapter<CharacterAdapte
     }
 
     private static final String RESOURCE_PREFIX = "res:";
+    // Stored accent colors are muted hash-derived RGB; map them onto a saturated palette at render time.
+    private static final int[] AVATAR_PALETTE = {
+            0xFF3B82F6, 0xFF6366F1, 0xFF8B5CF6, 0xFFEC4899, 0xFFF43F5E,
+            0xFFF97316, 0xFFF59E0B, 0xFF10B981, 0xFF14B8A6, 0xFF0EA5E9
+    };
     private final List<HomeFeedItem> items;
     private final OnCharacterClickListener listener;
     private final OnCharacterEditListener editListener;
@@ -150,8 +155,9 @@ public final class CharacterAdapter extends RecyclerView.Adapter<CharacterAdapte
         holder.portrait.setVisibility(View.GONE);
         holder.initialAvatar.setText(character.getName().substring(0, 1));
         GradientDrawable background = new GradientDrawable();
-        background.setShape(GradientDrawable.OVAL);
-        background.setColor(character.getAccentColor());
+        background.setShape(GradientDrawable.RECTANGLE);
+        background.setCornerRadius(12f * holder.itemView.getResources().getDisplayMetrics().density);
+        background.setColor(AVATAR_PALETTE[Math.floorMod(character.getAccentColor(), AVATAR_PALETTE.length)]);
         holder.initialAvatar.setBackground(background);
         holder.initialAvatar.setVisibility(View.VISIBLE);
     }
