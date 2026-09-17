@@ -1,20 +1,22 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  Dark palette ("暗紫夜店" night-tavern mood), aligned with AiChat's dark
-  semantic tokens. Every key mirrors values/colors.xml so the DayNight theme
-  swaps automatically. Primary brightens for contrast; soft surfaces darken.
+  Dark palette mirrors OmniTavern's built-in "经典黑" (classic-dark) preset:
+  GitHub-dark-style blue-gray neutrals with a #2F81F7 accent. Every key
+  mirrors values/colors.xml so the DayNight theme swaps automatically.
+  primary_dark doubles as the light accent text used on primary_soft chips.
 -->
 <resources>
-    <color name="primary">#C9B8F0</color>
-    <color name="primary_dark">#B19CDD</color>
-    <color name="primary_soft">#2E2740</color>
-    <color name="on_primary">#241C38</color>
-    <color name="background">#141119</color>
-    <color name="surface">#1E1A26</color>
-    <color name="input_background">#2A2434</color>
-    <color name="border">#3A3346</color>
-    <color name="text_primary">#EBE6F2</color>
-    <color name="text_secondary">#A79EB2</color>
-    <color name="warning">#E0A48F</color>
-    <color name="success">#82C7A3</color>
+    <color name="primary">#2F81F7</color>
+    <color name="primary_dark">#79C0FF</color>
+    <color name="primary_soft">#2E79C0FF</color>
+    <color name="on_primary">#FFFFFF</color>
+    <color name="background">#171B20</color>
+    <color name="surface">#1E232A</color>
+    <color name="input_background">#1D2229</color>
+    <color name="border">#30363D</color>
+    <color name="divider">#14F0F6FC</color>
+    <color name="text_primary">#F0F6FC</color>
+    <color name="text_secondary">#8B98A7</color>
+    <color name="warning">#FBBF24</color>
+    <color name="success">#2EA043</color>
 </resources>

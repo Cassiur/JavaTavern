@@ -3,18 +3,20 @@
     android:id="@+id/messageContainer"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    android:layout_marginBottom="10dp"
-    android:orientation="horizontal">
+    android:layout_marginBottom="6dp"
+    android:orientation="horizontal"
+    android:padding="2dp">
 
     <LinearLayout
         android:id="@+id/messageBubble"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:maxWidth="300dp"
+        android:elevation="1dp"
         android:orientation="vertical">
 
         <TextView
             android:id="@+id/messageReplyPreview"
+            android:maxWidth="@dimen/message_bubble_max_width"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:ellipsize="end"
@@ -35,6 +37,7 @@
 
         <TextView
             android:id="@+id/messageSpeaker"
+            android:maxWidth="@dimen/message_bubble_max_width"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:paddingStart="14dp"
@@ -47,6 +50,7 @@
 
         <TextView
             android:id="@+id/messageContent"
+            android:maxWidth="@dimen/message_bubble_max_width"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:paddingStart="14dp"
