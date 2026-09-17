@@ -239,8 +239,10 @@ public final class CharacterRepository {
         try (Cursor cursor = database.getReadableDatabase().query(
                 TavernDatabase.TABLE_WORLD_ENTRIES,
                 new String[]{
-                        "id", "keywords_json", "content", "enabled", "constant_entry",
-                        "position", "sort_order", "priority", "depth", "probability",
+                        "id", "keywords_json", "secondary_keys_json", "content", "enabled", "constant_entry",
+                        "position", "sort_order", "priority", "depth", "scan_depth",
+                        "case_sensitive", "match_whole_words", "use_group_scoring", "automation_id",
+                        "role", "vectorized", "sticky", "cooldown", "probability",
                         "exclude_recursion", "prevent_recursion"
                 },
                 "character_id = ?",
@@ -251,18 +253,28 @@ public final class CharacterRepository {
         )) {
             while (cursor.moveToNext()) {
                 entries.add(new WorldBookEntry(
-                        cursor.getLong(0),
-                        parseKeywords(cursor.getString(1)),
-                        cursor.getString(2),
-                        cursor.getInt(3) == 1,
-                        cursor.getInt(4) == 1,
-                        cursor.getInt(5),
-                        cursor.getInt(6),
-                        cursor.getInt(7),
-                        cursor.getInt(8),
-                        cursor.getInt(9),
-                        cursor.getInt(10) == 1,
-                        cursor.getInt(11) == 1
+                        cursor.getLong(0),      // id
+                        parseKeywords(cursor.getString(1)),  // keywords_json
+                        parseKeywords(cursor.getString(2)),  // secondary_keys_json
+                        cursor.getString(3),    // content
+                        cursor.getInt(4) == 1,  // enabled
+                        cursor.getInt(5) == 1,  // constant_entry
+                        cursor.getInt(6),       // position
+                        cursor.getInt(7),       // sort_order
+                        cursor.getInt(8),       // priority
+                        cursor.getInt(9),       // depth
+                        cursor.getInt(10),      // scan_depth
+                        cursor.getInt(11) == 1, // case_sensitive
+                        cursor.getInt(12) == 1, // match_whole_words
+                        cursor.getInt(13) == 1, // use_group_scoring
+                        cursor.getString(14),   // automation_id
+                        cursor.getString(15),   // role
+                        cursor.getInt(16) == 1, // vectorized
+                        cursor.getInt(17),      // sticky
+                        cursor.getInt(18),      // cooldown
+                        cursor.getInt(19),      // probability
+                        cursor.getInt(20) == 1, // exclude_recursion
+                        cursor.getInt(21) == 1  // prevent_recursion
                 ));
             }
         }
@@ -300,6 +312,7 @@ public final class CharacterRepository {
             values.put("character_id", characterId);
         }
         values.put("keywords_json", new JSONArray(entry.getKeywords()).toString());
+        values.put("secondary_keys_json", new JSONArray(entry.getSecondaryKeys()).toString());
         values.put("content", entry.getContent());
         values.put("enabled", entry.isEnabled() ? 1 : 0);
         values.put("constant_entry", entry.isConstant() ? 1 : 0);
@@ -307,6 +320,15 @@ public final class CharacterRepository {
         values.put("sort_order", entry.getOrder());
         values.put("priority", entry.getPriority());
         values.put("depth", entry.getDepth());
+        values.put("scan_depth", entry.getScanDepth());
+        values.put("case_sensitive", entry.isCaseSensitive() ? 1 : 0);
+        values.put("match_whole_words", entry.isMatchWholeWords() ? 1 : 0);
+        values.put("use_group_scoring", entry.isUseGroupScoring() ? 1 : 0);
+        values.put("automation_id", entry.getAutomationId());
+        values.put("role", entry.getRole());
+        values.put("vectorized", entry.isVectorized() ? 1 : 0);
+        values.put("sticky", entry.getSticky());
+        values.put("cooldown", entry.getCooldown());
         values.put("probability", entry.getProbability());
         values.put("exclude_recursion", entry.isExcludeRecursion() ? 1 : 0);
         values.put("prevent_recursion", entry.isPreventRecursion() ? 1 : 0);

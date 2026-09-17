@@ -25,7 +25,7 @@ import java.io.File;
 public final class TavernDatabase extends SQLiteOpenHelper {
     private static final String TAG = "TavernDatabase";
     private static final String DATABASE_NAME = "tavern.db";
-    private static final int DATABASE_VERSION = 6;
+    private static final int DATABASE_VERSION = 7;
 
     public static final String TABLE_CHARACTERS = "characters";
     public static final String TABLE_WORLD_ENTRIES = "world_entries";
@@ -116,6 +116,9 @@ public final class TavernDatabase extends SQLiteOpenHelper {
         if (oldVersion < 6) {
             upgradeToVersion6(database);
         }
+        if (oldVersion < 7) {
+            upgradeToVersion7(database);
+        }
     }
 
     /**
@@ -143,6 +146,33 @@ public final class TavernDatabase extends SQLiteOpenHelper {
         database.execSQL("ALTER TABLE " + TABLE_CHARACTERS +
                 " ADD COLUMN alternate_greetings_json TEXT NOT NULL DEFAULT '[]'");
         createPersonaTable(database);
+    }
+
+    /**
+     * SillyTavern 世界书完整字段对齐：次要关键词、扫描深度、大小写/整词匹配、
+     * 互斥组、角色类型、sticky/cooldown、向量化标记等
+     */
+    private void upgradeToVersion7(SQLiteDatabase database) {
+        database.execSQL("ALTER TABLE " + TABLE_WORLD_ENTRIES +
+                " ADD COLUMN secondary_keys_json TEXT NOT NULL DEFAULT '[]'");
+        database.execSQL("ALTER TABLE " + TABLE_WORLD_ENTRIES +
+                " ADD COLUMN scan_depth INTEGER NOT NULL DEFAULT 100");
+        database.execSQL("ALTER TABLE " + TABLE_WORLD_ENTRIES +
+                " ADD COLUMN case_sensitive INTEGER NOT NULL DEFAULT 0");
+        database.execSQL("ALTER TABLE " + TABLE_WORLD_ENTRIES +
+                " ADD COLUMN match_whole_words INTEGER NOT NULL DEFAULT 0");
+        database.execSQL("ALTER TABLE " + TABLE_WORLD_ENTRIES +
+                " ADD COLUMN use_group_scoring INTEGER NOT NULL DEFAULT 0");
+        database.execSQL("ALTER TABLE " + TABLE_WORLD_ENTRIES +
+                " ADD COLUMN automation_id TEXT NOT NULL DEFAULT ''");
+        database.execSQL("ALTER TABLE " + TABLE_WORLD_ENTRIES +
+                " ADD COLUMN role TEXT NOT NULL DEFAULT 'system'");
+        database.execSQL("ALTER TABLE " + TABLE_WORLD_ENTRIES +
+                " ADD COLUMN vectorized INTEGER NOT NULL DEFAULT 0");
+        database.execSQL("ALTER TABLE " + TABLE_WORLD_ENTRIES +
+                " ADD COLUMN sticky INTEGER NOT NULL DEFAULT 0");
+        database.execSQL("ALTER TABLE " + TABLE_WORLD_ENTRIES +
+                " ADD COLUMN cooldown INTEGER NOT NULL DEFAULT 0");
     }
 
     private void upgradeToVersion2(SQLiteDatabase database) {
@@ -189,6 +219,7 @@ public final class TavernDatabase extends SQLiteOpenHelper {
                         "id INTEGER PRIMARY KEY AUTOINCREMENT," +
                         "character_id TEXT NOT NULL," +
                         "keywords_json TEXT NOT NULL," +
+                        "secondary_keys_json TEXT NOT NULL DEFAULT '[]'," +
                         "content TEXT NOT NULL," +
                         "enabled INTEGER NOT NULL," +
                         "constant_entry INTEGER NOT NULL," +
@@ -196,6 +227,15 @@ public final class TavernDatabase extends SQLiteOpenHelper {
                         "sort_order INTEGER NOT NULL DEFAULT 100," +
                         "priority INTEGER NOT NULL DEFAULT 0," +
                         "depth INTEGER NOT NULL DEFAULT 4," +
+                        "scan_depth INTEGER NOT NULL DEFAULT 100," +
+                        "case_sensitive INTEGER NOT NULL DEFAULT 0," +
+                        "match_whole_words INTEGER NOT NULL DEFAULT 0," +
+                        "use_group_scoring INTEGER NOT NULL DEFAULT 0," +
+                        "automation_id TEXT NOT NULL DEFAULT ''," +
+                        "role TEXT NOT NULL DEFAULT 'system'," +
+                        "vectorized INTEGER NOT NULL DEFAULT 0," +
+                        "sticky INTEGER NOT NULL DEFAULT 0," +
+                        "cooldown INTEGER NOT NULL DEFAULT 0," +
                         "probability INTEGER NOT NULL DEFAULT 100," +
                         "exclude_recursion INTEGER NOT NULL DEFAULT 0," +
                         "prevent_recursion INTEGER NOT NULL DEFAULT 0," +
