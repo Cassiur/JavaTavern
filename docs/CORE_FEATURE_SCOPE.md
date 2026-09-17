@@ -4,6 +4,8 @@
 
 JavaTavern 不追求短期复制任何现有客户端。定位是：**原生 Android、可审计 Agent、移动端行为可解释的本地优先 AI 角色助手**。
 
+与 SillyTavern 的功能对齐现状（接口/Prompt组装/角色卡与世界书/扩展生态四个维度的详细差距分析）见 [`docs/SILLYTAVERN_PARITY.md`](SILLYTAVERN_PARITY.md)。
+
 ## 当前核心
 
 | 能力 | 状态 | 实现边界 |

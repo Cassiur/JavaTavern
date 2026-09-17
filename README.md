@@ -97,6 +97,7 @@ Activity + RecyclerView
 
 产品方向见 [`docs/PRODUCT_PRINCIPLES.md`](docs/PRODUCT_PRINCIPLES.md) 与 [`docs/COMPETITIVE_RESEARCH.md`](docs/COMPETITIVE_RESEARCH.md)。
 与 AiChat 的逐项功能核对记录在 [`docs/AICHAT_FEATURE_AUDIT.md`](docs/AICHAT_FEATURE_AUDIT.md)。
+与 SillyTavern 的功能对齐差距分析与分阶段计划见 [`docs/SILLYTAVERN_PARITY.md`](docs/SILLYTAVERN_PARITY.md)。
 
 ## 参与贡献
 
