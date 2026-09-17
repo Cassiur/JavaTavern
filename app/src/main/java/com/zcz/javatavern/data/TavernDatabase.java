@@ -25,7 +25,7 @@ import java.io.File;
 public final class TavernDatabase extends SQLiteOpenHelper {
     private static final String TAG = "TavernDatabase";
     private static final String DATABASE_NAME = "tavern.db";
-    private static final int DATABASE_VERSION = 5;
+    private static final int DATABASE_VERSION = 6;
 
     public static final String TABLE_CHARACTERS = "characters";
     public static final String TABLE_WORLD_ENTRIES = "world_entries";
@@ -35,6 +35,7 @@ public final class TavernDatabase extends SQLiteOpenHelper {
     public static final String TABLE_MESSAGES_FTS = "messages_fts";
     public static final String TABLE_PRESETS = "presets";
     public static final String TABLE_GROUPS = "groups";
+    public static final String TABLE_PERSONAS = "personas";
 
     @SuppressLint("StaticFieldLeak")
     private static volatile TavernDatabase instance;
@@ -80,6 +81,7 @@ public final class TavernDatabase extends SQLiteOpenHelper {
         createMessageVersionTable(database);
         createPresetTable(database);
         createGroupTable(database);
+        createPersonaTable(database);
         seedPresets(database);
         boolean migratedCharacters = migrateLegacyCharacters(database);
         migrateLegacyMessages(database);
@@ -111,6 +113,36 @@ public final class TavernDatabase extends SQLiteOpenHelper {
             database.execSQL("ALTER TABLE " + TABLE_MESSAGES +
                     " ADD COLUMN active_version INTEGER NOT NULL DEFAULT 1");
         }
+        if (oldVersion < 6) {
+            upgradeToVersion6(database);
+        }
+    }
+
+    /**
+     * SillyTavern-style segmented character fields (personality/scenario/
+     * post_history_instructions/creator_notes/character_version/mes_example/
+     * alternate_greetings), previously flattened into {@code system_prompt}
+     * at import time. Existing rows keep whatever their {@code system_prompt}
+     * already held — that text still renders an equivalent prompt — the new
+     * columns just start empty for them; only newly imported/edited
+     * characters populate the segmented fields going forward.
+     */
+    private void upgradeToVersion6(SQLiteDatabase database) {
+        database.execSQL("ALTER TABLE " + TABLE_CHARACTERS +
+                " ADD COLUMN personality TEXT NOT NULL DEFAULT ''");
+        database.execSQL("ALTER TABLE " + TABLE_CHARACTERS +
+                " ADD COLUMN scenario TEXT NOT NULL DEFAULT ''");
+        database.execSQL("ALTER TABLE " + TABLE_CHARACTERS +
+                " ADD COLUMN post_history_instructions TEXT NOT NULL DEFAULT ''");
+        database.execSQL("ALTER TABLE " + TABLE_CHARACTERS +
+                " ADD COLUMN creator_notes TEXT NOT NULL DEFAULT ''");
+        database.execSQL("ALTER TABLE " + TABLE_CHARACTERS +
+                " ADD COLUMN character_version TEXT NOT NULL DEFAULT ''");
+        database.execSQL("ALTER TABLE " + TABLE_CHARACTERS +
+                " ADD COLUMN mes_example TEXT NOT NULL DEFAULT ''");
+        database.execSQL("ALTER TABLE " + TABLE_CHARACTERS +
+                " ADD COLUMN alternate_greetings_json TEXT NOT NULL DEFAULT '[]'");
+        createPersonaTable(database);
     }
 
     private void upgradeToVersion2(SQLiteDatabase database) {
@@ -137,8 +169,16 @@ public final class TavernDatabase extends SQLiteOpenHelper {
                         "id TEXT PRIMARY KEY," +
                         "name TEXT NOT NULL," +
                         "description TEXT NOT NULL," +
+                        "personality TEXT NOT NULL DEFAULT ''," +
+                        "scenario TEXT NOT NULL DEFAULT ''," +
                         "greeting TEXT NOT NULL," +
                         "system_prompt TEXT NOT NULL," +
+                        "post_history_instructions TEXT NOT NULL DEFAULT ''," +
+                        "creator_notes TEXT NOT NULL DEFAULT ''," +
+                        "character_version TEXT NOT NULL DEFAULT ''," +
+                        "mes_example TEXT NOT NULL DEFAULT ''," +
+                        "alternate_greetings_json TEXT NOT NULL DEFAULT '[]'," +
+                        "persona_id TEXT," +
                         "accent_color INTEGER NOT NULL," +
                         "source_hash TEXT NOT NULL UNIQUE," +
                         "avatar TEXT NOT NULL DEFAULT ''," +
@@ -403,6 +443,24 @@ public final class TavernDatabase extends SQLiteOpenHelper {
                         "id TEXT PRIMARY KEY," +
                         "name TEXT NOT NULL," +
                         "member_ids_json TEXT NOT NULL," +
+                        "created_at INTEGER NOT NULL)"
+        );
+    }
+
+    /**
+     * User personas (SillyTavern-style): a name/description the user speaks
+     * as. {@code is_default} marks the one persona used when a character has
+     * no {@code characters.persona_id} override — at most one row should
+     * have it set, enforced in {@code PersonaRepository} rather than SQL so
+     * seeding/updates stay simple statements.
+     */
+    private void createPersonaTable(SQLiteDatabase database) {
+        database.execSQL(
+                "CREATE TABLE IF NOT EXISTS " + TABLE_PERSONAS + " (" +
+                        "id TEXT PRIMARY KEY," +
+                        "name TEXT NOT NULL," +
+                        "description TEXT NOT NULL DEFAULT ''," +
+                        "is_default INTEGER NOT NULL DEFAULT 0," +
                         "created_at INTEGER NOT NULL)"
         );
     }
