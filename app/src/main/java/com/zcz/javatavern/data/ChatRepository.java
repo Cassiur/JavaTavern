@@ -7,6 +7,7 @@ import com.zcz.javatavern.model.CharacterCardData;
 import com.zcz.javatavern.model.CharacterProfile;
 import com.zcz.javatavern.model.ChatMessage;
 import com.zcz.javatavern.model.HomeFeedItem;
+import com.zcz.javatavern.util.GreetingSelector;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -43,6 +44,7 @@ public final class ChatRepository implements AutoCloseable {
     private final CharacterRepository characterRepository;
     private final ChatHistoryStore historyStore;
     private final LongTermMemoryStore memoryStore;
+    private final GreetingSelector greetingSelector = new GreetingSelector();
 
     public ChatRepository(Context context) {
         Context applicationContext = context.getApplicationContext();
@@ -87,16 +89,24 @@ public final class ChatRepository implements AutoCloseable {
         boolean hasMoreHistory = messages.size() >= pageSize;
         if (messages.isEmpty()) {
             long createdAt = System.currentTimeMillis();
+            // 有备用开场白时随机挑一条（SillyTavern 风格：每次开新聊天换一个开场），
+            // 没有备用开场白的角色（绝大多数）行为和之前完全一样，总是用主开场白。
+            List<String> alternateGreetings = character.getAlternateGreetings();
+            String greeting = greetingSelector.selectGreeting(
+                    character.getGreeting(),
+                    alternateGreetings,
+                    alternateGreetings.isEmpty() ? -1 : -2
+            );
             long id = historyStore.addMessage(
                     character.getId(),
                     ChatMessage.Role.ASSISTANT,
-                    character.getGreeting(),
+                    greeting,
                     createdAt
             );
             messages.add(new ChatMessage(
                     id,
                     ChatMessage.Role.ASSISTANT,
-                    character.getGreeting(),
+                    greeting,
                     createdAt
             ));
         }

@@ -56,52 +56,47 @@ public class ExampleDialogueParser {
                 continue;
             }
             
-            // 解析单个示例块
-            ExampleExchange exchange = parseBlock(trimmed, userName, charName);
-            if (exchange != null) {
-                examples.add(exchange);
-            }
+            // 解析单个示例块（一个 <START> 块内可能有多轮交替对话）
+            examples.addAll(parseBlock(trimmed, userName, charName));
         }
-        
+
         return examples;
     }
-    
+
     /**
-     * 解析单个示例块
+     * 解析单个示例块，支持块内多轮交替的 user/char 行——每遇到一个 char 行就
+     * 与最近一个待配对的 user 行组成一轮，而不是只保留块内最后一组。
      */
-    private ExampleExchange parseBlock(String block, String userName, String charName) {
+    private List<ExampleExchange> parseBlock(String block, String userName, String charName) {
+        List<ExampleExchange> exchanges = new ArrayList<>();
         String[] lines = block.split("\n");
-        String userMsg = null;
-        String charMsg = null;
-        
+        String pendingUserMsg = null;
+
         for (String line : lines) {
             String trimmed = line.trim();
             if (trimmed.isEmpty()) {
                 continue;
             }
-            
+
             // 匹配 {{user}}: 或 userName:
             if (trimmed.startsWith("{{user}}:") || trimmed.startsWith(userName + ":")) {
                 int colonIndex = trimmed.indexOf(':');
                 if (colonIndex > 0 && colonIndex < trimmed.length() - 1) {
-                    userMsg = trimmed.substring(colonIndex + 1).trim();
+                    pendingUserMsg = trimmed.substring(colonIndex + 1).trim();
                 }
             }
             // 匹配 {{char}}: 或 charName:
             else if (trimmed.startsWith("{{char}}:") || trimmed.startsWith(charName + ":")) {
                 int colonIndex = trimmed.indexOf(':');
-                if (colonIndex > 0 && colonIndex < trimmed.length() - 1) {
-                    charMsg = trimmed.substring(colonIndex + 1).trim();
+                if (colonIndex > 0 && colonIndex < trimmed.length() - 1 && pendingUserMsg != null) {
+                    String charMsg = trimmed.substring(colonIndex + 1).trim();
+                    exchanges.add(new ExampleExchange(pendingUserMsg, charMsg));
+                    pendingUserMsg = null;
                 }
             }
         }
-        
-        // 需要同时有用户和角色消息
-        if (userMsg != null && charMsg != null) {
-            return new ExampleExchange(userMsg, charMsg);
-        }
-        
-        return null;
+
+        return exchanges;
     }
     
     /**

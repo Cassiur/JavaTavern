@@ -67,7 +67,7 @@ public final class ChatViewModel extends AndroidViewModel {
 
     /** Application-context repository — lives for the whole ViewModel lifetime. */
     private final ChatRepository ownedRepository;
-    private final OpenAiCompatibleClient modelClient = new OpenAiCompatibleClient();
+    private final OpenAiCompatibleClient modelClient;
 
     /** One active session per request; null means idle. */
     private final AtomicReference<StreamSession> currentSession = new AtomicReference<>(null);
@@ -105,6 +105,7 @@ public final class ChatViewModel extends AndroidViewModel {
     public ChatViewModel(@NonNull Application application) {
         super(application);
         ownedRepository = new ChatRepository(application.getApplicationContext());
+        modelClient = new OpenAiCompatibleClient(application.getApplicationContext());
     }
 
     public LiveData<StreamSnapshot> getStreamState() {

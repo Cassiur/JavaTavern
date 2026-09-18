@@ -39,26 +39,40 @@ public class MacroEngine {
             Persona persona,
             int maxContext
     ) {
+        return replaceMacros(text, character.getName(), persona.getName(), maxContext);
+    }
+
+    /**
+     * 同上，但直接take角色名/用户名字符串——调用方只有名字、没有完整
+     * {@link CharacterProfile}/{@link Persona} 实例时用这个重载（例如网络层只
+     * 从设置里解析出了 persona 名字，不想为了替宏而构造整个 Persona 对象）。
+     */
+    public String replaceMacros(
+            String text,
+            String charName,
+            String userName,
+            int maxContext
+    ) {
         if (text == null || text.isEmpty()) {
             return text;
         }
-        
+
         String result = text;
-        
+
         // 基础宏
-        result = result.replace("{{char}}", character.getName());
-        result = result.replace("{{user}}", persona.getName());
-        
+        result = result.replace("{{char}}", charName);
+        result = result.replace("{{user}}", userName);
+
         // 上下文宏
         result = result.replace("{{maxc}}", String.valueOf(maxContext));
         result = result.replace("{{minc}}", String.valueOf(maxContext / 2));
-        
+
         // {{random::}} 宏
         result = replaceRandomMacros(result);
-        
+
         // {{roll:}} 宏
         result = replaceRollMacros(result);
-        
+
         return result;
     }
     
