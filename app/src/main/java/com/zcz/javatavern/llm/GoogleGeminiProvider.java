@@ -11,35 +11,43 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.function.Consumer;
 
 /**
  * Google Gemini API 适配器
- * 
+ *
  * 支持 Gemini 1.5 Pro、Gemini 1.5 Flash 等模型
  * API 文档：https://ai.google.dev/api/generate-content
  */
 public class GoogleGeminiProvider implements ChatCompletionProvider {
-    
-    private static final String BASE_URL = "https://generativelanguage.googleapis.com/v1beta/";
-    
+
+    public static final String DEFAULT_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/";
+
+    private final String baseUrl;
     private final String apiKey;
     private final String model;
-    
-    public GoogleGeminiProvider(String apiKey, String model) {
+
+    public GoogleGeminiProvider(String baseUrl, String apiKey, String model) {
+        String normalized = baseUrl == null || baseUrl.trim().isEmpty()
+                ? DEFAULT_BASE_URL
+                : baseUrl.trim();
+        this.baseUrl = normalized.endsWith("/") ? normalized : normalized + "/";
         this.apiKey = apiKey;
         this.model = model;
     }
-    
+
     @Override
     public void streamChatCompletion(
             List<ChatMessage> messages,
             GenerationParams params,
-            StreamCallback callback
+            StreamCallback callback,
+            Consumer<HttpURLConnection> connectionSink
     ) throws IOException {
         String endpoint = String.format("models/%s:streamGenerateContent?key=%s&alt=sse", model, apiKey);
-        URL url = new URL(BASE_URL + endpoint);
+        URL url = new URL(baseUrl + endpoint);
         HttpURLConnection conn = (HttpURLConnection) url.openConnection();
-        
+        connectionSink.accept(conn);
+
         try {
             conn.setRequestMethod("POST");
             conn.setRequestProperty("Content-Type", "application/json");

@@ -11,6 +11,7 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.function.Consumer;
 
 /**
  * OpenAI 兼容格式的 API 适配器
@@ -37,11 +38,13 @@ public class OpenAICompatibleProvider implements ChatCompletionProvider {
     public void streamChatCompletion(
             List<ChatMessage> messages,
             GenerationParams params,
-            StreamCallback callback
+            StreamCallback callback,
+            Consumer<HttpURLConnection> connectionSink
     ) throws IOException {
         URL url = new URL(baseUrl + "chat/completions");
         HttpURLConnection conn = (HttpURLConnection) url.openConnection();
-        
+        connectionSink.accept(conn);
+
         try {
             conn.setRequestMethod("POST");
             conn.setRequestProperty("Content-Type", "application/json");

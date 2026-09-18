@@ -40,10 +40,10 @@ public class ProviderFactory {
                 );
                 
             case ANTHROPIC:
-                return new AnthropicProvider(apiKey, model);
-                
+                return new AnthropicProvider(baseUrl, apiKey, model);
+
             case GOOGLE_GEMINI:
-                return new GoogleGeminiProvider(apiKey, model);
+                return new GoogleGeminiProvider(baseUrl, apiKey, model);
                 
             case DEEPSEEK:
                 return new OpenAICompatibleProvider(

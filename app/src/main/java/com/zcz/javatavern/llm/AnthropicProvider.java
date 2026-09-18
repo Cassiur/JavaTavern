@@ -11,35 +11,43 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.function.Consumer;
 
 /**
  * Anthropic Claude API 适配器
- * 
+ *
  * 支持 Claude 3.5 Sonnet、Claude 3 Opus 等模型
  * API 文档：https://docs.anthropic.com/claude/reference/messages-streaming
  */
 public class AnthropicProvider implements ChatCompletionProvider {
-    
-    private static final String BASE_URL = "https://api.anthropic.com/v1/";
+
+    public static final String DEFAULT_BASE_URL = "https://api.anthropic.com/v1/";
     private static final String API_VERSION = "2023-06-01";
-    
+
+    private final String baseUrl;
     private final String apiKey;
     private final String model;
-    
-    public AnthropicProvider(String apiKey, String model) {
+
+    public AnthropicProvider(String baseUrl, String apiKey, String model) {
+        String normalized = baseUrl == null || baseUrl.trim().isEmpty()
+                ? DEFAULT_BASE_URL
+                : baseUrl.trim();
+        this.baseUrl = normalized.endsWith("/") ? normalized : normalized + "/";
         this.apiKey = apiKey;
         this.model = model;
     }
-    
+
     @Override
     public void streamChatCompletion(
             List<ChatMessage> messages,
             GenerationParams params,
-            StreamCallback callback
+            StreamCallback callback,
+            Consumer<HttpURLConnection> connectionSink
     ) throws IOException {
-        URL url = new URL(BASE_URL + "messages");
+        URL url = new URL(baseUrl + "messages");
         HttpURLConnection conn = (HttpURLConnection) url.openConnection();
-        
+        connectionSink.accept(conn);
+
         try {
             conn.setRequestMethod("POST");
             conn.setRequestProperty("Content-Type", "application/json");

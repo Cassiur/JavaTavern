@@ -5,7 +5,11 @@ import android.content.Context;
 import com.zcz.javatavern.data.GenerationParams;
 import com.zcz.javatavern.data.ModelSettings;
 import com.zcz.javatavern.data.PersonaRepository;
+import com.zcz.javatavern.data.ProviderCatalog;
 import com.zcz.javatavern.data.TavernDatabase;
+import com.zcz.javatavern.llm.AnthropicProvider;
+import com.zcz.javatavern.llm.ChatCompletionProvider;
+import com.zcz.javatavern.llm.GoogleGeminiProvider;
 import com.zcz.javatavern.model.CharacterProfile;
 import com.zcz.javatavern.model.ChatMessage;
 import com.zcz.javatavern.prompt.ExampleDialogueParser;
@@ -24,6 +28,7 @@ import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -139,6 +144,11 @@ public final class OpenAiCompatibleClient implements AutoCloseable {
             String userName,
             StreamListener listener
     ) {
+        if (isNativeChatProvider(settings.getProviderId())) {
+            executeStreamViaNativeProvider(
+                    call, settings, systemPrompt, conversation, charNameForMacros, userName, listener);
+            return;
+        }
         HttpURLConnection connection = null;
         try {
             URL endpoint = new URL(buildEndpoint(settings.getBaseUrl()));
@@ -207,6 +217,110 @@ public final class OpenAiCompatibleClient implements AutoCloseable {
             }
             call.connection = null;
         }
+    }
+
+    /**
+     * Anthropic/Google 不是 OpenAI 请求格式，走 {@link ChatCompletionProvider}
+     * 实现而不是本类默认的 {@code /chat/completions} 路径。OpenAI/DeepSeek/
+     * OpenRouter/自定义端点这几个 provider 本来就是 OpenAI 兼容格式，继续走
+     * 现有路径不变。
+     */
+    static boolean isNativeChatProvider(String providerId) {
+        return ProviderCatalog.ANTHROPIC_ID.equals(providerId)
+                || ProviderCatalog.GOOGLE_ID.equals(providerId);
+    }
+
+    private void executeStreamViaNativeProvider(
+            StreamCall call,
+            ModelSettings settings,
+            String systemPrompt,
+            List<ChatMessage> conversation,
+            String charNameForMacros,
+            String userName,
+            StreamListener listener
+    ) {
+        if (hasImageAttachment(conversation)) {
+            listener.onError("当前所选模型（" + settings.getProviderId() + "）暂不支持图片附件");
+            return;
+        }
+        ChatCompletionProvider provider = ProviderCatalog.ANTHROPIC_ID.equals(settings.getProviderId())
+                ? new AnthropicProvider(settings.getBaseUrl(), settings.getApiKey(), settings.getModel())
+                : new GoogleGeminiProvider(settings.getBaseUrl(), settings.getApiKey(), settings.getModel());
+        List<ChatCompletionProvider.ChatMessage> messages = buildProviderMessages(
+                settings, systemPrompt, conversation, charNameForMacros, userName);
+
+        listener.onOpen();
+        try {
+            provider.streamChatCompletion(
+                    messages,
+                    settings.getGenerationParams(),
+                    new ChatCompletionProvider.StreamCallback() {
+                        @Override
+                        public void onContent(String delta, boolean isReasoning) {
+                            // isReasoning 内容（DeepSeek/Claude 思考过程）本轮先丢弃，留给
+                            // 推理内容存储+展示那一轮再接。
+                            if (!isReasoning && delta != null && !delta.isEmpty()
+                                    && !call.isCancelled()) {
+                                listener.onDelta(delta);
+                            }
+                        }
+
+                        @Override
+                        public void onComplete() {
+                            if (!call.isCancelled()) {
+                                listener.onComplete();
+                            }
+                        }
+
+                        @Override
+                        public void onError(IOException error) {
+                            if (!call.isCancelled()) {
+                                listener.onError(
+                                        error.getMessage() == null ? "模型请求失败" : error.getMessage());
+                            }
+                        }
+                    },
+                    connection -> call.connection = connection
+            );
+        } catch (IOException alreadyReportedByCallback) {
+            // ChatCompletionProvider 实现在 rethrow 之前已经调用过
+            // callback.onError()——这里只是不让异常裸露到线程池的默认处理器，
+            // 不需要（也不应该）再报一次。
+        } finally {
+            call.connection = null;
+        }
+    }
+
+    private List<ChatCompletionProvider.ChatMessage> buildProviderMessages(
+            ModelSettings settings,
+            String systemPrompt,
+            List<ChatMessage> conversation,
+            String charNameForMacros,
+            String userName
+    ) {
+        List<ChatCompletionProvider.ChatMessage> messages = new ArrayList<>();
+        messages.add(new ChatCompletionProvider.ChatMessage("system", systemPrompt));
+        int messageBudget = settings.getContextTokens() - TokenEstimator.estimate(systemPrompt);
+        for (ChatMessage message : ConversationWindow.selectWithinTokenBudget(
+                conversation, messageBudget)) {
+            String text = message.getContent();
+            if (message.hasReply()) {
+                text = "[回复：" + message.getReplyPreview() + "]\n" + text;
+            }
+            text = macroEngine.replaceMacros(text, charNameForMacros, userName, settings.getContextTokens());
+            String role = message.getRole() == ChatMessage.Role.USER ? "user" : "assistant";
+            messages.add(new ChatCompletionProvider.ChatMessage(role, text));
+        }
+        return messages;
+    }
+
+    private boolean hasImageAttachment(List<ChatMessage> conversation) {
+        for (ChatMessage message : conversation) {
+            if (message.hasImageAttachment()) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private JSONObject buildRequestBody(
