@@ -53,6 +53,11 @@ public final class TavernDatabaseTest {
         assertTrue(tableExists(database, TavernDatabase.TABLE_AGENT_AUDIT));
         assertTrue(tableExists(database, TavernDatabase.TABLE_PRESETS));
         assertTrue(tableExists(database, TavernDatabase.TABLE_GROUPS));
+        assertTrue(tableExists(database, TavernDatabase.TABLE_PERSONAS));
+        assertTrue(tableExists(database, TavernDatabase.TABLE_CHATS));
+        assertTrue("fresh installs must have messages.chat_id from onCreate, " +
+                        "not only via upgradeToVersion8",
+                columnExists(database, TavernDatabase.TABLE_MESSAGES, "chat_id"));
 
         try (Cursor cursor = database.rawQuery(
                 "SELECT COUNT(*) FROM " + TavernDatabase.TABLE_CHARACTERS, null)) {
@@ -217,6 +222,161 @@ public final class TavernDatabaseTest {
                 tableExists(upgraded, TavernDatabase.TABLE_MESSAGE_VERSIONS));
     }
 
+    /**
+     * Regression test for a real bug: {@code upgradeToVersion8} (adds
+     * {@code messages.chat_id} and the {@code chats} table) was defined but
+     * never wired into {@code onUpgrade}, so real users upgrading from v7
+     * would hit {@code SQLiteException: no such column: chat_id} the first
+     * time any multi-chat code ran a query against it. Builds the schema as
+     * it existed at v7 (after upgradeToVersion6/7, before upgradeToVersion8),
+     * seeds a pre-existing message with no chat_id, then reopens through
+     * {@link TavernDatabase} so the real {@code onUpgrade(db, 7, 8)} runs.
+     */
+    @Test
+    public void upgradeFromVersion7_addsChatIdAndMigratesExistingMessagesToDefaultChat() {
+        File dbFile = context.getDatabasePath("tavern.db");
+        try (SQLiteDatabase legacy = SQLiteDatabase.openOrCreateDatabase(dbFile, null)) {
+            legacy.execSQL("CREATE TABLE characters (" +
+                    "id TEXT PRIMARY KEY," +
+                    "name TEXT NOT NULL," +
+                    "description TEXT NOT NULL," +
+                    "personality TEXT NOT NULL DEFAULT ''," +
+                    "scenario TEXT NOT NULL DEFAULT ''," +
+                    "greeting TEXT NOT NULL," +
+                    "system_prompt TEXT NOT NULL," +
+                    "post_history_instructions TEXT NOT NULL DEFAULT ''," +
+                    "creator_notes TEXT NOT NULL DEFAULT ''," +
+                    "character_version TEXT NOT NULL DEFAULT ''," +
+                    "mes_example TEXT NOT NULL DEFAULT ''," +
+                    "alternate_greetings_json TEXT NOT NULL DEFAULT '[]'," +
+                    "accent_color INTEGER NOT NULL," +
+                    "source_hash TEXT NOT NULL UNIQUE," +
+                    "avatar TEXT NOT NULL DEFAULT ''," +
+                    "created_at INTEGER NOT NULL)");
+            legacy.execSQL("CREATE TABLE world_entries (" +
+                    "id INTEGER PRIMARY KEY AUTOINCREMENT," +
+                    "character_id TEXT NOT NULL," +
+                    "keywords_json TEXT NOT NULL," +
+                    "secondary_keys_json TEXT NOT NULL DEFAULT '[]'," +
+                    "content TEXT NOT NULL," +
+                    "enabled INTEGER NOT NULL," +
+                    "constant_entry INTEGER NOT NULL," +
+                    "position INTEGER NOT NULL," +
+                    "sort_order INTEGER NOT NULL DEFAULT 100," +
+                    "priority INTEGER NOT NULL DEFAULT 0," +
+                    "depth INTEGER NOT NULL DEFAULT 4," +
+                    "scan_depth INTEGER NOT NULL DEFAULT 100," +
+                    "case_sensitive INTEGER NOT NULL DEFAULT 0," +
+                    "match_whole_words INTEGER NOT NULL DEFAULT 0," +
+                    "use_group_scoring INTEGER NOT NULL DEFAULT 0," +
+                    "automation_id TEXT NOT NULL DEFAULT ''," +
+                    "role TEXT NOT NULL DEFAULT 'system'," +
+                    "vectorized INTEGER NOT NULL DEFAULT 0," +
+                    "sticky INTEGER NOT NULL DEFAULT 0," +
+                    "cooldown INTEGER NOT NULL DEFAULT 0," +
+                    "probability INTEGER NOT NULL DEFAULT 100," +
+                    "exclude_recursion INTEGER NOT NULL DEFAULT 0," +
+                    "prevent_recursion INTEGER NOT NULL DEFAULT 0)");
+            legacy.execSQL("CREATE TABLE messages (" +
+                    "id INTEGER PRIMARY KEY AUTOINCREMENT," +
+                    "character_id TEXT NOT NULL," +
+                    "role TEXT NOT NULL," +
+                    "kind TEXT NOT NULL DEFAULT 'TEXT'," +
+                    "title TEXT NOT NULL DEFAULT ''," +
+                    "action_token TEXT NOT NULL DEFAULT ''," +
+                    "action_type TEXT NOT NULL DEFAULT ''," +
+                    "action_state TEXT NOT NULL DEFAULT 'NONE'," +
+                    "attachment_path TEXT NOT NULL DEFAULT ''," +
+                    "attachment_mime_type TEXT NOT NULL DEFAULT ''," +
+                    "reply_to_message_id INTEGER NOT NULL DEFAULT -1," +
+                    "reply_preview TEXT NOT NULL DEFAULT ''," +
+                    "reaction TEXT NOT NULL DEFAULT ''," +
+                    "speaker_id TEXT NOT NULL DEFAULT ''," +
+                    "speaker_name TEXT NOT NULL DEFAULT ''," +
+                    "version_count INTEGER NOT NULL DEFAULT 1," +
+                    "active_version INTEGER NOT NULL DEFAULT 1," +
+                    "content TEXT NOT NULL," +
+                    "created_at INTEGER NOT NULL)");
+            legacy.execSQL("CREATE TABLE agent_audit (" +
+                    "id INTEGER PRIMARY KEY AUTOINCREMENT," +
+                    "character_id TEXT NOT NULL," +
+                    "action_token TEXT NOT NULL," +
+                    "action_type TEXT NOT NULL," +
+                    "state TEXT NOT NULL," +
+                    "detail TEXT NOT NULL," +
+                    "created_at INTEGER NOT NULL)");
+            legacy.execSQL("CREATE TABLE presets (" +
+                    "id TEXT PRIMARY KEY, name TEXT NOT NULL, temperature TEXT, top_p TEXT," +
+                    "max_tokens TEXT, frequency_penalty TEXT, presence_penalty TEXT," +
+                    "created_at INTEGER NOT NULL)");
+            legacy.execSQL("CREATE TABLE groups (" +
+                    "id TEXT PRIMARY KEY, name TEXT NOT NULL, member_ids_json TEXT NOT NULL," +
+                    "created_at INTEGER NOT NULL)");
+            legacy.execSQL("CREATE TABLE message_versions (" +
+                    "id INTEGER PRIMARY KEY AUTOINCREMENT, message_id INTEGER NOT NULL," +
+                    "content TEXT NOT NULL, created_at INTEGER NOT NULL)");
+            legacy.execSQL("CREATE TABLE personas (" +
+                    "id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT NOT NULL DEFAULT ''," +
+                    "is_default INTEGER NOT NULL DEFAULT 0, avatar TEXT NOT NULL DEFAULT ''," +
+                    "created_at INTEGER NOT NULL)");
+
+            ContentValues character = new ContentValues();
+            character.put("id", "pre-v8-character");
+            character.put("name", "Old Data");
+            character.put("description", "must survive the v8 upgrade");
+            character.put("greeting", "hi");
+            character.put("system_prompt", "be nice");
+            character.put("accent_color", 0);
+            character.put("source_hash", "hash-v7");
+            character.put("avatar", "");
+            character.put("created_at", 1000L);
+            legacy.insertOrThrow("characters", null, character);
+
+            ContentValues message = new ContentValues();
+            message.put("character_id", "pre-v8-character");
+            message.put("role", "USER");
+            message.put("content", "message from before multi-chat existed");
+            message.put("created_at", 2000L);
+            legacy.insertOrThrow("messages", null, message);
+
+            legacy.execSQL("PRAGMA user_version = 7");
+        }
+
+        // Reopening through TavernDatabase triggers onUpgrade(db, 7, 8).
+        SQLiteDatabase upgraded = TavernDatabase.get(context).getWritableDatabase();
+
+        assertTrue("v8 chats table must exist after upgrade",
+                tableExists(upgraded, TavernDatabase.TABLE_CHATS));
+        assertTrue("v8 messages.chat_id column must exist after upgrade",
+                columnExists(upgraded, TavernDatabase.TABLE_MESSAGES, "chat_id"));
+
+        String expectedChatId = "default-pre-v8-character";
+        try (Cursor cursor = upgraded.query(
+                TavernDatabase.TABLE_CHATS,
+                new String[]{"character_id", "name"},
+                "id = ?",
+                new String[]{expectedChatId},
+                null, null, null)) {
+            assertTrue("a default chat must be synthesized for the pre-existing character",
+                    cursor.moveToFirst());
+            assertEquals("pre-v8-character", cursor.getString(0));
+            assertEquals("默认聊天", cursor.getString(1));
+        }
+
+        try (Cursor cursor = upgraded.query(
+                TavernDatabase.TABLE_MESSAGES,
+                new String[]{"content", "chat_id"},
+                "character_id = ?",
+                new String[]{"pre-v8-character"},
+                null, null, null)) {
+            assertTrue("pre-existing message row must survive the upgrade",
+                    cursor.moveToFirst());
+            assertEquals("message from before multi-chat existed", cursor.getString(0));
+            assertEquals("pre-existing message must be bucketed into the default chat",
+                    expectedChatId, cursor.getString(1));
+        }
+    }
+
     @Test
     public void legacyCharacterMigration_movesRowsAndDeletesSourceFile() {
         File legacyFile = context.getDatabasePath("characters.db");
@@ -307,5 +467,16 @@ public final class TavernDatabaseTest {
                 new String[]{tableName})) {
             return cursor.moveToFirst();
         }
+    }
+
+    private boolean columnExists(SQLiteDatabase database, String table, String column) {
+        try (Cursor cursor = database.rawQuery("PRAGMA table_info(" + table + ")", null)) {
+            while (cursor.moveToNext()) {
+                if (column.equals(cursor.getString(1))) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 }

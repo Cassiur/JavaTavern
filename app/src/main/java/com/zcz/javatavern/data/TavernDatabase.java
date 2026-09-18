@@ -121,6 +121,9 @@ public final class TavernDatabase extends SQLiteOpenHelper {
         if (oldVersion < 7) {
             upgradeToVersion7(database);
         }
+        if (oldVersion < 8) {
+            upgradeToVersion8(database);
+        }
     }
 
     /**
@@ -299,6 +302,7 @@ public final class TavernDatabase extends SQLiteOpenHelper {
                         "speaker_name TEXT NOT NULL DEFAULT ''," +
                         "version_count INTEGER NOT NULL DEFAULT 1," +
                         "active_version INTEGER NOT NULL DEFAULT 1," +
+                        "chat_id TEXT NOT NULL DEFAULT 'default'," +
                         "content TEXT NOT NULL," +
                         "created_at INTEGER NOT NULL)"
         );
