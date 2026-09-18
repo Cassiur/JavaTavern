@@ -365,6 +365,7 @@ public final class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.Me
         bindImage(holder, message);
         holder.replyPreview.setText(message.getReplyPreview());
         holder.replyPreview.setVisibility(message.hasReply() ? View.VISIBLE : View.GONE);
+        bindReasoning(holder, message);
         holder.content.setText(MarkdownRenderer.render(
                 holder.itemView.getContext(), message.getContent()));
         holder.content.setVisibility(message.getContent().isEmpty() ? View.GONE : View.VISIBLE);
@@ -390,6 +391,31 @@ public final class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.Me
                 holder.itemView.getContext(),
                 isUser ? R.color.on_primary : R.color.text_secondary
         ));
+    }
+
+    /**
+     * 推理内容（DeepSeek R1 / Claude extended thinking）折叠展示——默认收起，
+     * 点开才看得到，避免长思考过程把气泡撑爆。RecyclerView 回收视图后展开状态
+     * 不保留，每次 bind 都重新收起，这是一个已知的简化。
+     */
+    private void bindReasoning(MessageViewHolder holder, ChatMessage message) {
+        if (!message.hasReasoningContent()) {
+            holder.reasoningToggle.setVisibility(View.GONE);
+            holder.reasoningContent.setVisibility(View.GONE);
+            return;
+        }
+        Context context = holder.itemView.getContext();
+        holder.reasoningToggle.setVisibility(View.VISIBLE);
+        holder.reasoningContent.setVisibility(View.GONE);
+        holder.reasoningToggle.setText(context.getString(R.string.reasoning_toggle_collapsed));
+        holder.reasoningContent.setText(message.getReasoningContent());
+        holder.reasoningToggle.setOnClickListener(view -> {
+            boolean expanded = holder.reasoningContent.getVisibility() == View.VISIBLE;
+            holder.reasoningContent.setVisibility(expanded ? View.GONE : View.VISIBLE);
+            holder.reasoningToggle.setText(context.getString(expanded
+                    ? R.string.reasoning_toggle_collapsed
+                    : R.string.reasoning_toggle_expanded));
+        });
     }
 
     /** 渲染「‹ 2 / 3 ›」版本翻页条；到头的一端置灰禁用。 */
@@ -477,6 +503,8 @@ public final class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.Me
         private final LinearLayout container;
         private final TextView content;
         private final TextView replyPreview;
+        private final TextView reasoningToggle;
+        private final TextView reasoningContent;
         private final TextView reaction;
         private final TextView speaker;
         private final View versionBar;
@@ -499,6 +527,8 @@ public final class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.Me
             container = itemView.findViewById(R.id.messageContainer);
             content = itemView.findViewById(R.id.messageContent);
             replyPreview = itemView.findViewById(R.id.messageReplyPreview);
+            reasoningToggle = itemView.findViewById(R.id.messageReasoningToggle);
+            reasoningContent = itemView.findViewById(R.id.messageReasoningContent);
             reaction = itemView.findViewById(R.id.messageReaction);
             speaker = itemView.findViewById(R.id.messageSpeaker);
             versionBar = itemView.findViewById(R.id.messageVersionBar);

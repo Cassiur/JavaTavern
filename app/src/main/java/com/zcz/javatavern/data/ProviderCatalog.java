@@ -4,6 +4,13 @@ import java.util.List;
 
 public final class ProviderCatalog {
     public static final String CUSTOM_ID = "custom";
+    /**
+     * 非 OpenAI 兼容格式的原生 provider id——{@code OpenAiCompatibleClient}
+     * 靠这两个 id 分流到 {@code AnthropicProvider}/{@code GoogleGeminiProvider}，
+     * 而不是走默认的 {@code /chat/completions} 请求格式。
+     */
+    public static final String ANTHROPIC_ID = "anthropic";
+    public static final String GOOGLE_ID = "google";
     private static final List<ProviderPreset> PRESETS = List.of(
             new ProviderPreset(
                     "openai",
@@ -25,6 +32,20 @@ public final class ProviderCatalog {
                     "https://openrouter.ai/api/v1",
                     "",
                     "从 OpenRouter 模型页复制模型 ID"
+            ),
+            new ProviderPreset(
+                    ANTHROPIC_ID,
+                    "Anthropic",
+                    "https://api.anthropic.com/v1",
+                    "",
+                    "例如 claude-sonnet-4-5"
+            ),
+            new ProviderPreset(
+                    GOOGLE_ID,
+                    "Google Gemini",
+                    "https://generativelanguage.googleapis.com/v1beta",
+                    "",
+                    "例如 gemini-2.5-flash"
             ),
             new ProviderPreset(
                     CUSTOM_ID,

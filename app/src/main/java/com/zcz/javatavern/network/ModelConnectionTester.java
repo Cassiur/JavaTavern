@@ -1,6 +1,7 @@
 package com.zcz.javatavern.network;
 
 import com.zcz.javatavern.data.ModelSettings;
+import com.zcz.javatavern.data.ProviderCatalog;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -11,18 +12,29 @@ import java.net.URL;
 import java.nio.charset.StandardCharsets;
 
 public final class ModelConnectionTester {
+    private static final String ANTHROPIC_API_VERSION = "2023-06-01";
+
     public ConnectionTestResult test(ModelSettings settings) {
         long startedAt = System.currentTimeMillis();
         HttpURLConnection connection = null;
         try {
-            connection = (HttpURLConnection) new URL(
-                    buildModelsEndpoint(settings.getBaseUrl())
-            ).openConnection();
+            boolean isAnthropic = ProviderCatalog.ANTHROPIC_ID.equals(settings.getProviderId());
+            boolean isGoogle = ProviderCatalog.GOOGLE_ID.equals(settings.getProviderId());
+            String endpoint = buildModelsEndpoint(settings.getBaseUrl());
+            if (isGoogle) {
+                // Gemini 没有 Bearer/x-api-key 这套，key 直接拼进查询串。
+                endpoint += "?key=" + settings.getApiKey().trim();
+            }
+            connection = (HttpURLConnection) new URL(endpoint).openConnection();
             connection.setRequestMethod("GET");
             connection.setConnectTimeout(10_000);
             connection.setReadTimeout(10_000);
             connection.setRequestProperty("Accept", "application/json");
-            if (!settings.getApiKey().trim().isEmpty()) {
+            if (isAnthropic) {
+                connection.setRequestProperty("x-api-key", settings.getApiKey());
+                connection.setRequestProperty("anthropic-version", ANTHROPIC_API_VERSION);
+            } else if (!isGoogle && !settings.getApiKey().trim().isEmpty()) {
+                // Google 的 key 已经拼进 URL 查询串；OpenAI 兼容格式走 Bearer header。
                 connection.setRequestProperty("Authorization", "Bearer " + settings.getApiKey());
             }
             int responseCode = connection.getResponseCode();

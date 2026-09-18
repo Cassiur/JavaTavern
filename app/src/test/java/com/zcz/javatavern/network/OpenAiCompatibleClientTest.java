@@ -73,4 +73,21 @@ public final class OpenAiCompatibleClientTest {
         assertEquals("test-model", body.getString("model"));
         assertEquals(1, body.length());
     }
+
+    /**
+     * 路由分流：只有 Anthropic/Google 走非 OpenAI 请求格式的
+     * {@code ChatCompletionProvider} 路径；OpenAI/DeepSeek/OpenRouter/自定义
+     * 端点这几个本来就是 OpenAI 兼容格式，必须继续走现有 {@code /chat/completions}
+     * 路径，不能被误判去调用不存在的 Anthropic/Gemini 端点。
+     */
+    @Test
+    public void isNativeChatProvider_onlyTrueForAnthropicAndGoogle() {
+        assertTrue(OpenAiCompatibleClient.isNativeChatProvider("anthropic"));
+        assertTrue(OpenAiCompatibleClient.isNativeChatProvider("google"));
+        assertFalse(OpenAiCompatibleClient.isNativeChatProvider("openai"));
+        assertFalse(OpenAiCompatibleClient.isNativeChatProvider("deepseek"));
+        assertFalse(OpenAiCompatibleClient.isNativeChatProvider("openrouter"));
+        assertFalse(OpenAiCompatibleClient.isNativeChatProvider("custom"));
+        assertFalse(OpenAiCompatibleClient.isNativeChatProvider(null));
+    }
 }

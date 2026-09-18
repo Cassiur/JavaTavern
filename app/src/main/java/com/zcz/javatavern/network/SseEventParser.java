@@ -8,10 +8,16 @@ public final class SseEventParser {
     public static final class Event {
         private final boolean done;
         private final String delta;
+        private final String reasoningDelta;
 
         Event(boolean done, String delta) {
+            this(done, delta, "");
+        }
+
+        Event(boolean done, String delta, String reasoningDelta) {
             this.done = done;
             this.delta = delta;
+            this.reasoningDelta = reasoningDelta;
         }
 
         public boolean isDone() {
@@ -20,6 +26,11 @@ public final class SseEventParser {
 
         public String getDelta() {
             return delta;
+        }
+
+        /** DeepSeek R1 风格的 {@code delta.reasoning_content}；没有则为空串。 */
+        public String getReasoningDelta() {
+            return reasoningDelta;
         }
     }
 
@@ -49,7 +60,14 @@ public final class SseEventParser {
                 return EMPTY;
             }
             JSONObject delta = choices.getJSONObject(0).optJSONObject("delta");
-            return new Event(false, delta == null ? "" : delta.optString("content", ""));
+            if (delta == null) {
+                return EMPTY;
+            }
+            return new Event(
+                    false,
+                    delta.optString("content", ""),
+                    delta.optString("reasoning_content", "")
+            );
         } catch (JSONException malformed) {
             return EMPTY;
         }

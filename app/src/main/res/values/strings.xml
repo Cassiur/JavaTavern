@@ -200,6 +200,8 @@
     <string name="message_version_next">下一版</string>
     <string name="message_version_switch_failed">切换版本失败</string>
     <string name="message_version_ready">已重新生成，可用 ‹ › 翻看 %1$d 个版本</string>
+    <string name="reasoning_toggle_collapsed">🤔 思考过程 ▸</string>
+    <string name="reasoning_toggle_expanded">🤔 思考过程 ▾</string>
 
     <!-- Chat extraction: speaker labels, placeholders, agent action copy -->
     <string name="speaker_user">我</string>
