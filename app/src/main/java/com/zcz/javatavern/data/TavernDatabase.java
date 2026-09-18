@@ -25,7 +25,7 @@ import java.io.File;
 public final class TavernDatabase extends SQLiteOpenHelper {
     private static final String TAG = "TavernDatabase";
     private static final String DATABASE_NAME = "tavern.db";
-    private static final int DATABASE_VERSION = 7;
+    private static final int DATABASE_VERSION = 8;
 
     public static final String TABLE_CHARACTERS = "characters";
     public static final String TABLE_WORLD_ENTRIES = "world_entries";
@@ -36,6 +36,7 @@ public final class TavernDatabase extends SQLiteOpenHelper {
     public static final String TABLE_PRESETS = "presets";
     public static final String TABLE_GROUPS = "groups";
     public static final String TABLE_PERSONAS = "personas";
+    public static final String TABLE_CHATS = "chats";
 
     @SuppressLint("StaticFieldLeak")
     private static volatile TavernDatabase instance;
@@ -78,6 +79,7 @@ public final class TavernDatabase extends SQLiteOpenHelper {
     public void onCreate(SQLiteDatabase database) {
         createCharacterTables(database);
         createMessageTables(database);
+        createChatTable(database);
         createMessageVersionTable(database);
         createPresetTable(database);
         createGroupTable(database);
@@ -173,6 +175,36 @@ public final class TavernDatabase extends SQLiteOpenHelper {
                 " ADD COLUMN sticky INTEGER NOT NULL DEFAULT 0");
         database.execSQL("ALTER TABLE " + TABLE_WORLD_ENTRIES +
                 " ADD COLUMN cooldown INTEGER NOT NULL DEFAULT 0");
+    }
+
+    /**
+     * 一角色多聊天：消息表增加 chat_id、chats 表存聊天元数据。
+     * 迁移时将所有既有消息归入"默认聊天"，保持向后兼容。
+     */
+    private void upgradeToVersion8(SQLiteDatabase database) {
+        database.execSQL("ALTER TABLE " + TABLE_MESSAGES +
+                " ADD COLUMN chat_id TEXT NOT NULL DEFAULT 'default'");
+        database.execSQL(
+                "CREATE TABLE " + TABLE_CHATS + " (" +
+                        "id TEXT PRIMARY KEY," +
+                        "character_id TEXT NOT NULL," +
+                        "name TEXT NOT NULL," +
+                        "created_at INTEGER NOT NULL," +
+                        "FOREIGN KEY(character_id) REFERENCES " + TABLE_CHARACTERS + "(id) ON DELETE CASCADE)"
+        );
+        database.execSQL(
+                "CREATE INDEX index_chats_character ON " + TABLE_CHATS + "(character_id)"
+        );
+        // 为所有有消息的角色创建默认聊天
+        database.execSQL(
+                "INSERT INTO " + TABLE_CHATS + " (id, character_id, name, created_at) " +
+                        "SELECT 'default-' || character_id, character_id, '默认聊天', MIN(created_at) " +
+                        "FROM " + TABLE_MESSAGES + " GROUP BY character_id"
+        );
+        // 将所有既有消息关联到默认聊天
+        database.execSQL(
+                "UPDATE " + TABLE_MESSAGES + " SET chat_id = 'default-' || character_id"
+        );
     }
 
     private void upgradeToVersion2(SQLiteDatabase database) {
@@ -501,7 +533,22 @@ public final class TavernDatabase extends SQLiteOpenHelper {
                         "name TEXT NOT NULL," +
                         "description TEXT NOT NULL DEFAULT ''," +
                         "is_default INTEGER NOT NULL DEFAULT 0," +
+                        "avatar TEXT NOT NULL DEFAULT ''," +
                         "created_at INTEGER NOT NULL)"
+        );
+    }
+
+    private void createChatTable(SQLiteDatabase database) {
+        database.execSQL(
+                "CREATE TABLE IF NOT EXISTS " + TABLE_CHATS + " (" +
+                        "id TEXT PRIMARY KEY," +
+                        "character_id TEXT NOT NULL," +
+                        "name TEXT NOT NULL," +
+                        "created_at INTEGER NOT NULL," +
+                        "FOREIGN KEY(character_id) REFERENCES " + TABLE_CHARACTERS + "(id) ON DELETE CASCADE)"
+        );
+        database.execSQL(
+                "CREATE INDEX IF NOT EXISTS index_chats_character ON " + TABLE_CHATS + "(character_id)"
         );
     }
 
