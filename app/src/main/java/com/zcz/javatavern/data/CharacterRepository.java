@@ -33,7 +33,12 @@ public final class CharacterRepository {
         List<CharacterProfile> characters = new ArrayList<>();
         try (Cursor cursor = database.getReadableDatabase().query(
                 TavernDatabase.TABLE_CHARACTERS,
-                new String[]{"id", "name", "description", "greeting", "system_prompt", "accent_color", "avatar"},
+                new String[]{
+                        "id", "name", "description", "personality", "scenario", "greeting",
+                        "system_prompt", "post_history_instructions", "creator_notes",
+                        "character_version", "mes_example", "alternate_greetings_json",
+                        "accent_color", "avatar"
+                },
                 null,
                 null,
                 null,
@@ -51,7 +56,12 @@ public final class CharacterRepository {
     public CharacterProfile findById(String id) {
         try (Cursor cursor = database.getReadableDatabase().query(
                 TavernDatabase.TABLE_CHARACTERS,
-                new String[]{"id", "name", "description", "greeting", "system_prompt", "accent_color", "avatar"},
+                new String[]{
+                        "id", "name", "description", "personality", "scenario", "greeting",
+                        "system_prompt", "post_history_instructions", "creator_notes",
+                        "character_version", "mes_example", "alternate_greetings_json",
+                        "accent_color", "avatar"
+                },
                 "id = ?",
                 new String[]{id},
                 null,
@@ -90,8 +100,16 @@ public final class CharacterRepository {
             characterValues.put("id", characterId);
             characterValues.put("name", card.getName());
             characterValues.put("description", card.getDescription());
+            characterValues.put("personality", card.getPersonality());
+            characterValues.put("scenario", card.getScenario());
             characterValues.put("greeting", card.getGreeting());
             characterValues.put("system_prompt", card.getSystemPrompt());
+            characterValues.put("post_history_instructions", card.getPostHistoryInstructions());
+            characterValues.put("creator_notes", card.getCreatorNotes());
+            characterValues.put("character_version", card.getCharacterVersion());
+            characterValues.put("mes_example", card.getMesExample());
+            characterValues.put("alternate_greetings_json", 
+                    new JSONArray(card.getAlternateGreetings()).toString());
             characterValues.put("accent_color", accentColor);
             characterValues.put("source_hash", card.getSourceHash());
             characterValues.put("avatar", card.getAvatar() == null ? "" : card.getAvatar());
@@ -107,9 +125,16 @@ public final class CharacterRepository {
                     characterId,
                     card.getName(),
                     card.getDescription(),
+                    card.getPersonality(),
+                    card.getScenario(),
                     card.getGreeting(),
                     accentColor,
                     card.getSystemPrompt(),
+                    card.getPostHistoryInstructions(),
+                    card.getCreatorNotes(),
+                    card.getCharacterVersion(),
+                    card.getMesExample(),
+                    card.getAlternateGreetings(),
                     card.getAvatar() == null ? "" : card.getAvatar(),
                     card.getWorldEntries()
             );
@@ -130,8 +155,15 @@ public final class CharacterRepository {
         values.put("id", characterId);
         values.put("name", name);
         values.put("description", description);
+        values.put("personality", "");
+        values.put("scenario", "");
         values.put("greeting", greeting);
         values.put("system_prompt", systemPrompt);
+        values.put("post_history_instructions", "");
+        values.put("creator_notes", "");
+        values.put("character_version", "");
+        values.put("mes_example", "");
+        values.put("alternate_greetings_json", "[]");
         values.put("accent_color", accentColor);
         values.put("source_hash", characterId);
         values.put("avatar", "");
@@ -141,9 +173,16 @@ public final class CharacterRepository {
                 characterId,
                 name,
                 description,
+                "",
+                "",
                 greeting,
                 accentColor,
                 systemPrompt,
+                "",
+                "",
+                "",
+                "",
+                List.of(),
                 "",
                 List.of()
         );
@@ -177,13 +216,20 @@ public final class CharacterRepository {
 
     private CharacterProfile readCharacter(Cursor cursor, List<WorldBookEntry> worldEntries) {
         return new CharacterProfile(
-                cursor.getString(0),
-                cursor.getString(1),
-                cursor.getString(2),
-                cursor.getString(3),
-                cursor.getInt(5),
-                cursor.getString(4),
-                cursor.getString(6),
+                cursor.getString(0),   // id
+                cursor.getString(1),   // name
+                cursor.getString(2),   // description
+                cursor.getString(3),   // personality
+                cursor.getString(4),   // scenario
+                cursor.getString(5),   // greeting
+                cursor.getInt(12),     // accent_color
+                cursor.getString(6),   // system_prompt
+                cursor.getString(7),   // post_history_instructions
+                cursor.getString(8),   // creator_notes
+                cursor.getString(9),   // character_version
+                cursor.getString(10),  // mes_example
+                parseAlternateGreetings(cursor.getString(11)),  // alternate_greetings_json
+                cursor.getString(13),  // avatar
                 worldEntries
         );
     }
@@ -193,8 +239,10 @@ public final class CharacterRepository {
         try (Cursor cursor = database.getReadableDatabase().query(
                 TavernDatabase.TABLE_WORLD_ENTRIES,
                 new String[]{
-                        "id", "keywords_json", "content", "enabled", "constant_entry",
-                        "position", "sort_order", "priority", "depth", "probability",
+                        "id", "keywords_json", "secondary_keys_json", "content", "enabled", "constant_entry",
+                        "position", "sort_order", "priority", "depth", "scan_depth",
+                        "case_sensitive", "match_whole_words", "use_group_scoring", "automation_id",
+                        "role", "vectorized", "sticky", "cooldown", "probability",
                         "exclude_recursion", "prevent_recursion"
                 },
                 "character_id = ?",
@@ -205,18 +253,28 @@ public final class CharacterRepository {
         )) {
             while (cursor.moveToNext()) {
                 entries.add(new WorldBookEntry(
-                        cursor.getLong(0),
-                        parseKeywords(cursor.getString(1)),
-                        cursor.getString(2),
-                        cursor.getInt(3) == 1,
-                        cursor.getInt(4) == 1,
-                        cursor.getInt(5),
-                        cursor.getInt(6),
-                        cursor.getInt(7),
-                        cursor.getInt(8),
-                        cursor.getInt(9),
-                        cursor.getInt(10) == 1,
-                        cursor.getInt(11) == 1
+                        cursor.getLong(0),      // id
+                        parseKeywords(cursor.getString(1)),  // keywords_json
+                        parseKeywords(cursor.getString(2)),  // secondary_keys_json
+                        cursor.getString(3),    // content
+                        cursor.getInt(4) == 1,  // enabled
+                        cursor.getInt(5) == 1,  // constant_entry
+                        cursor.getInt(6),       // position
+                        cursor.getInt(7),       // sort_order
+                        cursor.getInt(8),       // priority
+                        cursor.getInt(9),       // depth
+                        cursor.getInt(10),      // scan_depth
+                        cursor.getInt(11) == 1, // case_sensitive
+                        cursor.getInt(12) == 1, // match_whole_words
+                        cursor.getInt(13) == 1, // use_group_scoring
+                        cursor.getString(14),   // automation_id
+                        cursor.getString(15),   // role
+                        cursor.getInt(16) == 1, // vectorized
+                        cursor.getInt(17),      // sticky
+                        cursor.getInt(18),      // cooldown
+                        cursor.getInt(19),      // probability
+                        cursor.getInt(20) == 1, // exclude_recursion
+                        cursor.getInt(21) == 1  // prevent_recursion
                 ));
             }
         }
@@ -254,6 +312,7 @@ public final class CharacterRepository {
             values.put("character_id", characterId);
         }
         values.put("keywords_json", new JSONArray(entry.getKeywords()).toString());
+        values.put("secondary_keys_json", new JSONArray(entry.getSecondaryKeys()).toString());
         values.put("content", entry.getContent());
         values.put("enabled", entry.isEnabled() ? 1 : 0);
         values.put("constant_entry", entry.isConstant() ? 1 : 0);
@@ -261,6 +320,15 @@ public final class CharacterRepository {
         values.put("sort_order", entry.getOrder());
         values.put("priority", entry.getPriority());
         values.put("depth", entry.getDepth());
+        values.put("scan_depth", entry.getScanDepth());
+        values.put("case_sensitive", entry.isCaseSensitive() ? 1 : 0);
+        values.put("match_whole_words", entry.isMatchWholeWords() ? 1 : 0);
+        values.put("use_group_scoring", entry.isUseGroupScoring() ? 1 : 0);
+        values.put("automation_id", entry.getAutomationId());
+        values.put("role", entry.getRole());
+        values.put("vectorized", entry.isVectorized() ? 1 : 0);
+        values.put("sticky", entry.getSticky());
+        values.put("cooldown", entry.getCooldown());
         values.put("probability", entry.getProbability());
         values.put("exclude_recursion", entry.isExcludeRecursion() ? 1 : 0);
         values.put("prevent_recursion", entry.isPreventRecursion() ? 1 : 0);
@@ -280,6 +348,24 @@ public final class CharacterRepository {
         } catch (JSONException ignored) {
         }
         return keywords;
+    }
+
+    private List<String> parseAlternateGreetings(String json) {
+        List<String> greetings = new ArrayList<>();
+        if (json == null || json.trim().isEmpty() || "[]".equals(json.trim())) {
+            return greetings;
+        }
+        try {
+            JSONArray array = new JSONArray(json);
+            for (int index = 0; index < array.length(); index++) {
+                String greeting = array.optString(index).trim();
+                if (!greeting.isEmpty()) {
+                    greetings.add(greeting);
+                }
+            }
+        } catch (JSONException ignored) {
+        }
+        return greetings;
     }
 
     private String findIdBySourceHash(SQLiteDatabase writable, String sourceHash) {

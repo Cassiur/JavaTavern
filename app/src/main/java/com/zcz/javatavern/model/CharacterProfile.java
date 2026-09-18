@@ -6,11 +6,52 @@ public final class CharacterProfile {
     private final String id;
     private final String name;
     private final String description;
+    private final String personality;
+    private final String scenario;
     private final String greeting;
     private final int accentColor;
     private final String systemPrompt;
+    private final String postHistoryInstructions;
+    private final String creatorNotes;
+    private final String characterVersion;
+    private final String mesExample;
+    private final List<String> alternateGreetings;
     private final String avatar;
     private final List<WorldBookEntry> worldEntries;
+
+    public CharacterProfile(
+            String id,
+            String name,
+            String description,
+            String personality,
+            String scenario,
+            String greeting,
+            int accentColor,
+            String systemPrompt,
+            String postHistoryInstructions,
+            String creatorNotes,
+            String characterVersion,
+            String mesExample,
+            List<String> alternateGreetings,
+            String avatar,
+            List<WorldBookEntry> worldEntries
+    ) {
+        this.id = id;
+        this.name = name;
+        this.description = description;
+        this.personality = personality == null ? "" : personality;
+        this.scenario = scenario == null ? "" : scenario;
+        this.greeting = greeting;
+        this.accentColor = accentColor;
+        this.systemPrompt = systemPrompt;
+        this.postHistoryInstructions = postHistoryInstructions == null ? "" : postHistoryInstructions;
+        this.creatorNotes = creatorNotes == null ? "" : creatorNotes;
+        this.characterVersion = characterVersion == null ? "" : characterVersion;
+        this.mesExample = mesExample == null ? "" : mesExample;
+        this.alternateGreetings = alternateGreetings == null ? List.of() : List.copyOf(alternateGreetings);
+        this.avatar = avatar == null ? "" : avatar;
+        this.worldEntries = List.copyOf(worldEntries);
+    }
 
     public CharacterProfile(
             String id,
@@ -22,14 +63,8 @@ public final class CharacterProfile {
             String avatar,
             List<WorldBookEntry> worldEntries
     ) {
-        this.id = id;
-        this.name = name;
-        this.description = description;
-        this.greeting = greeting;
-        this.accentColor = accentColor;
-        this.systemPrompt = systemPrompt;
-        this.avatar = avatar == null ? "" : avatar;
-        this.worldEntries = List.copyOf(worldEntries);
+        this(id, name, description, "", "", greeting, accentColor, systemPrompt,
+                "", "", "", "", List.of(), avatar, worldEntries);
     }
 
     public CharacterProfile(
@@ -66,6 +101,14 @@ public final class CharacterProfile {
         return description;
     }
 
+    public String getPersonality() {
+        return personality;
+    }
+
+    public String getScenario() {
+        return scenario;
+    }
+
     public String getGreeting() {
         return greeting;
     }
@@ -76,6 +119,26 @@ public final class CharacterProfile {
 
     public String getSystemPrompt() {
         return systemPrompt;
+    }
+
+    public String getPostHistoryInstructions() {
+        return postHistoryInstructions;
+    }
+
+    public String getCreatorNotes() {
+        return creatorNotes;
+    }
+
+    public String getCharacterVersion() {
+        return characterVersion;
+    }
+
+    public String getMesExample() {
+        return mesExample;
+    }
+
+    public List<String> getAlternateGreetings() {
+        return alternateGreetings;
     }
 
     /**

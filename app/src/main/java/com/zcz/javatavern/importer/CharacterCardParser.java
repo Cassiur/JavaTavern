@@ -27,7 +27,6 @@ public final class CharacterCardParser {
         }
         String description = firstNonBlank(
                 data.optString("description"),
-                data.optString("personality"),
                 "导入的 AI 角色"
         );
         String greeting = firstNonBlank(
@@ -35,24 +34,37 @@ public final class CharacterCardParser {
                 data.optString("first_message"),
                 "你好。"
         );
-        String systemPrompt = buildSystemPrompt(data, description);
         return new CharacterCardData(
                 name,
                 description,
+                data.optString("personality").trim(),
+                data.optString("scenario").trim(),
                 greeting,
-                systemPrompt,
+                data.optString("system_prompt").trim(),
+                data.optString("post_history_instructions").trim(),
+                data.optString("creator_notes").trim(),
+                data.optString("character_version").trim(),
+                data.optString("mes_example").trim(),
+                parseAlternateGreetings(data),
                 sha256(json),
+                "",
                 parseWorldEntries(data, root)
         );
     }
 
-    private String buildSystemPrompt(JSONObject data, String description) {
-        List<String> sections = new ArrayList<>();
-        addSection(sections, "角色描述", description);
-        addSection(sections, "性格", data.optString("personality"));
-        addSection(sections, "场景", data.optString("scenario"));
-        addSection(sections, "角色规则", data.optString("system_prompt"));
-        return String.join("\n\n", sections);
+    private List<String> parseAlternateGreetings(JSONObject data) {
+        JSONArray raw = data.optJSONArray("alternate_greetings");
+        if (raw == null) {
+            return List.of();
+        }
+        List<String> greetings = new ArrayList<>();
+        for (int index = 0; index < raw.length(); index++) {
+            String greeting = raw.optString(index).trim();
+            if (!greeting.isEmpty()) {
+                greetings.add(greeting);
+            }
+        }
+        return greetings;
     }
 
     private List<WorldBookEntry> parseWorldEntries(JSONObject data, JSONObject root) {
@@ -148,13 +160,6 @@ public final class CharacterCardParser {
         String normalized = keyword.trim();
         if (!normalized.isEmpty()) {
             keywords.add(normalized);
-        }
-    }
-
-    private void addSection(List<String> sections, String title, String value) {
-        String normalized = value.trim();
-        if (!normalized.isEmpty()) {
-            sections.add(title + "：" + normalized);
         }
     }
 

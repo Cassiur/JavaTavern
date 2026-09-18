@@ -25,7 +25,7 @@ import java.io.File;
 public final class TavernDatabase extends SQLiteOpenHelper {
     private static final String TAG = "TavernDatabase";
     private static final String DATABASE_NAME = "tavern.db";
-    private static final int DATABASE_VERSION = 5;
+    private static final int DATABASE_VERSION = 8;
 
     public static final String TABLE_CHARACTERS = "characters";
     public static final String TABLE_WORLD_ENTRIES = "world_entries";
@@ -35,6 +35,8 @@ public final class TavernDatabase extends SQLiteOpenHelper {
     public static final String TABLE_MESSAGES_FTS = "messages_fts";
     public static final String TABLE_PRESETS = "presets";
     public static final String TABLE_GROUPS = "groups";
+    public static final String TABLE_PERSONAS = "personas";
+    public static final String TABLE_CHATS = "chats";
 
     @SuppressLint("StaticFieldLeak")
     private static volatile TavernDatabase instance;
@@ -77,9 +79,11 @@ public final class TavernDatabase extends SQLiteOpenHelper {
     public void onCreate(SQLiteDatabase database) {
         createCharacterTables(database);
         createMessageTables(database);
+        createChatTable(database);
         createMessageVersionTable(database);
         createPresetTable(database);
         createGroupTable(database);
+        createPersonaTable(database);
         seedPresets(database);
         boolean migratedCharacters = migrateLegacyCharacters(database);
         migrateLegacyMessages(database);
@@ -111,6 +115,99 @@ public final class TavernDatabase extends SQLiteOpenHelper {
             database.execSQL("ALTER TABLE " + TABLE_MESSAGES +
                     " ADD COLUMN active_version INTEGER NOT NULL DEFAULT 1");
         }
+        if (oldVersion < 6) {
+            upgradeToVersion6(database);
+        }
+        if (oldVersion < 7) {
+            upgradeToVersion7(database);
+        }
+        if (oldVersion < 8) {
+            upgradeToVersion8(database);
+        }
+    }
+
+    /**
+     * SillyTavern-style segmented character fields (personality/scenario/
+     * post_history_instructions/creator_notes/character_version/mes_example/
+     * alternate_greetings), previously flattened into {@code system_prompt}
+     * at import time. Existing rows keep whatever their {@code system_prompt}
+     * already held — that text still renders an equivalent prompt — the new
+     * columns just start empty for them; only newly imported/edited
+     * characters populate the segmented fields going forward.
+     */
+    private void upgradeToVersion6(SQLiteDatabase database) {
+        database.execSQL("ALTER TABLE " + TABLE_CHARACTERS +
+                " ADD COLUMN personality TEXT NOT NULL DEFAULT ''");
+        database.execSQL("ALTER TABLE " + TABLE_CHARACTERS +
+                " ADD COLUMN scenario TEXT NOT NULL DEFAULT ''");
+        database.execSQL("ALTER TABLE " + TABLE_CHARACTERS +
+                " ADD COLUMN post_history_instructions TEXT NOT NULL DEFAULT ''");
+        database.execSQL("ALTER TABLE " + TABLE_CHARACTERS +
+                " ADD COLUMN creator_notes TEXT NOT NULL DEFAULT ''");
+        database.execSQL("ALTER TABLE " + TABLE_CHARACTERS +
+                " ADD COLUMN character_version TEXT NOT NULL DEFAULT ''");
+        database.execSQL("ALTER TABLE " + TABLE_CHARACTERS +
+                " ADD COLUMN mes_example TEXT NOT NULL DEFAULT ''");
+        database.execSQL("ALTER TABLE " + TABLE_CHARACTERS +
+                " ADD COLUMN alternate_greetings_json TEXT NOT NULL DEFAULT '[]'");
+        createPersonaTable(database);
+    }
+
+    /**
+     * SillyTavern 世界书完整字段对齐：次要关键词、扫描深度、大小写/整词匹配、
+     * 互斥组、角色类型、sticky/cooldown、向量化标记等
+     */
+    private void upgradeToVersion7(SQLiteDatabase database) {
+        database.execSQL("ALTER TABLE " + TABLE_WORLD_ENTRIES +
+                " ADD COLUMN secondary_keys_json TEXT NOT NULL DEFAULT '[]'");
+        database.execSQL("ALTER TABLE " + TABLE_WORLD_ENTRIES +
+                " ADD COLUMN scan_depth INTEGER NOT NULL DEFAULT 100");
+        database.execSQL("ALTER TABLE " + TABLE_WORLD_ENTRIES +
+                " ADD COLUMN case_sensitive INTEGER NOT NULL DEFAULT 0");
+        database.execSQL("ALTER TABLE " + TABLE_WORLD_ENTRIES +
+                " ADD COLUMN match_whole_words INTEGER NOT NULL DEFAULT 0");
+        database.execSQL("ALTER TABLE " + TABLE_WORLD_ENTRIES +
+                " ADD COLUMN use_group_scoring INTEGER NOT NULL DEFAULT 0");
+        database.execSQL("ALTER TABLE " + TABLE_WORLD_ENTRIES +
+                " ADD COLUMN automation_id TEXT NOT NULL DEFAULT ''");
+        database.execSQL("ALTER TABLE " + TABLE_WORLD_ENTRIES +
+                " ADD COLUMN role TEXT NOT NULL DEFAULT 'system'");
+        database.execSQL("ALTER TABLE " + TABLE_WORLD_ENTRIES +
+                " ADD COLUMN vectorized INTEGER NOT NULL DEFAULT 0");
+        database.execSQL("ALTER TABLE " + TABLE_WORLD_ENTRIES +
+                " ADD COLUMN sticky INTEGER NOT NULL DEFAULT 0");
+        database.execSQL("ALTER TABLE " + TABLE_WORLD_ENTRIES +
+                " ADD COLUMN cooldown INTEGER NOT NULL DEFAULT 0");
+    }
+
+    /**
+     * 一角色多聊天：消息表增加 chat_id、chats 表存聊天元数据。
+     * 迁移时将所有既有消息归入"默认聊天"，保持向后兼容。
+     */
+    private void upgradeToVersion8(SQLiteDatabase database) {
+        database.execSQL("ALTER TABLE " + TABLE_MESSAGES +
+                " ADD COLUMN chat_id TEXT NOT NULL DEFAULT 'default'");
+        database.execSQL(
+                "CREATE TABLE " + TABLE_CHATS + " (" +
+                        "id TEXT PRIMARY KEY," +
+                        "character_id TEXT NOT NULL," +
+                        "name TEXT NOT NULL," +
+                        "created_at INTEGER NOT NULL," +
+                        "FOREIGN KEY(character_id) REFERENCES " + TABLE_CHARACTERS + "(id) ON DELETE CASCADE)"
+        );
+        database.execSQL(
+                "CREATE INDEX index_chats_character ON " + TABLE_CHATS + "(character_id)"
+        );
+        // 为所有有消息的角色创建默认聊天
+        database.execSQL(
+                "INSERT INTO " + TABLE_CHATS + " (id, character_id, name, created_at) " +
+                        "SELECT 'default-' || character_id, character_id, '默认聊天', MIN(created_at) " +
+                        "FROM " + TABLE_MESSAGES + " GROUP BY character_id"
+        );
+        // 将所有既有消息关联到默认聊天
+        database.execSQL(
+                "UPDATE " + TABLE_MESSAGES + " SET chat_id = 'default-' || character_id"
+        );
     }
 
     private void upgradeToVersion2(SQLiteDatabase database) {
@@ -137,8 +234,16 @@ public final class TavernDatabase extends SQLiteOpenHelper {
                         "id TEXT PRIMARY KEY," +
                         "name TEXT NOT NULL," +
                         "description TEXT NOT NULL," +
+                        "personality TEXT NOT NULL DEFAULT ''," +
+                        "scenario TEXT NOT NULL DEFAULT ''," +
                         "greeting TEXT NOT NULL," +
                         "system_prompt TEXT NOT NULL," +
+                        "post_history_instructions TEXT NOT NULL DEFAULT ''," +
+                        "creator_notes TEXT NOT NULL DEFAULT ''," +
+                        "character_version TEXT NOT NULL DEFAULT ''," +
+                        "mes_example TEXT NOT NULL DEFAULT ''," +
+                        "alternate_greetings_json TEXT NOT NULL DEFAULT '[]'," +
+                        "persona_id TEXT," +
                         "accent_color INTEGER NOT NULL," +
                         "source_hash TEXT NOT NULL UNIQUE," +
                         "avatar TEXT NOT NULL DEFAULT ''," +
@@ -149,6 +254,7 @@ public final class TavernDatabase extends SQLiteOpenHelper {
                         "id INTEGER PRIMARY KEY AUTOINCREMENT," +
                         "character_id TEXT NOT NULL," +
                         "keywords_json TEXT NOT NULL," +
+                        "secondary_keys_json TEXT NOT NULL DEFAULT '[]'," +
                         "content TEXT NOT NULL," +
                         "enabled INTEGER NOT NULL," +
                         "constant_entry INTEGER NOT NULL," +
@@ -156,6 +262,15 @@ public final class TavernDatabase extends SQLiteOpenHelper {
                         "sort_order INTEGER NOT NULL DEFAULT 100," +
                         "priority INTEGER NOT NULL DEFAULT 0," +
                         "depth INTEGER NOT NULL DEFAULT 4," +
+                        "scan_depth INTEGER NOT NULL DEFAULT 100," +
+                        "case_sensitive INTEGER NOT NULL DEFAULT 0," +
+                        "match_whole_words INTEGER NOT NULL DEFAULT 0," +
+                        "use_group_scoring INTEGER NOT NULL DEFAULT 0," +
+                        "automation_id TEXT NOT NULL DEFAULT ''," +
+                        "role TEXT NOT NULL DEFAULT 'system'," +
+                        "vectorized INTEGER NOT NULL DEFAULT 0," +
+                        "sticky INTEGER NOT NULL DEFAULT 0," +
+                        "cooldown INTEGER NOT NULL DEFAULT 0," +
                         "probability INTEGER NOT NULL DEFAULT 100," +
                         "exclude_recursion INTEGER NOT NULL DEFAULT 0," +
                         "prevent_recursion INTEGER NOT NULL DEFAULT 0," +
@@ -187,6 +302,7 @@ public final class TavernDatabase extends SQLiteOpenHelper {
                         "speaker_name TEXT NOT NULL DEFAULT ''," +
                         "version_count INTEGER NOT NULL DEFAULT 1," +
                         "active_version INTEGER NOT NULL DEFAULT 1," +
+                        "chat_id TEXT NOT NULL DEFAULT 'default'," +
                         "content TEXT NOT NULL," +
                         "created_at INTEGER NOT NULL)"
         );
@@ -404,6 +520,39 @@ public final class TavernDatabase extends SQLiteOpenHelper {
                         "name TEXT NOT NULL," +
                         "member_ids_json TEXT NOT NULL," +
                         "created_at INTEGER NOT NULL)"
+        );
+    }
+
+    /**
+     * User personas (SillyTavern-style): a name/description the user speaks
+     * as. {@code is_default} marks the one persona used when a character has
+     * no {@code characters.persona_id} override — at most one row should
+     * have it set, enforced in {@code PersonaRepository} rather than SQL so
+     * seeding/updates stay simple statements.
+     */
+    private void createPersonaTable(SQLiteDatabase database) {
+        database.execSQL(
+                "CREATE TABLE IF NOT EXISTS " + TABLE_PERSONAS + " (" +
+                        "id TEXT PRIMARY KEY," +
+                        "name TEXT NOT NULL," +
+                        "description TEXT NOT NULL DEFAULT ''," +
+                        "is_default INTEGER NOT NULL DEFAULT 0," +
+                        "avatar TEXT NOT NULL DEFAULT ''," +
+                        "created_at INTEGER NOT NULL)"
+        );
+    }
+
+    private void createChatTable(SQLiteDatabase database) {
+        database.execSQL(
+                "CREATE TABLE IF NOT EXISTS " + TABLE_CHATS + " (" +
+                        "id TEXT PRIMARY KEY," +
+                        "character_id TEXT NOT NULL," +
+                        "name TEXT NOT NULL," +
+                        "created_at INTEGER NOT NULL," +
+                        "FOREIGN KEY(character_id) REFERENCES " + TABLE_CHARACTERS + "(id) ON DELETE CASCADE)"
+        );
+        database.execSQL(
+                "CREATE INDEX IF NOT EXISTS index_chats_character ON " + TABLE_CHATS + "(character_id)"
         );
     }
 
