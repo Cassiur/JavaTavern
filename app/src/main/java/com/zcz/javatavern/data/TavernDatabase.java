@@ -25,7 +25,7 @@ import java.io.File;
 public final class TavernDatabase extends SQLiteOpenHelper {
     private static final String TAG = "TavernDatabase";
     private static final String DATABASE_NAME = "tavern.db";
-    private static final int DATABASE_VERSION = 8;
+    private static final int DATABASE_VERSION = 9;
 
     public static final String TABLE_CHARACTERS = "characters";
     public static final String TABLE_WORLD_ENTRIES = "world_entries";
@@ -124,6 +124,9 @@ public final class TavernDatabase extends SQLiteOpenHelper {
         if (oldVersion < 8) {
             upgradeToVersion8(database);
         }
+        if (oldVersion < 9) {
+            upgradeToVersion9(database);
+        }
     }
 
     /**
@@ -208,6 +211,15 @@ public final class TavernDatabase extends SQLiteOpenHelper {
         database.execSQL(
                 "UPDATE " + TABLE_MESSAGES + " SET chat_id = 'default-' || character_id"
         );
+    }
+
+    /**
+     * 推理内容支持：消息表增加 reasoning_content 字段
+     * 用于存储 DeepSeek R1 等模型的思考过程
+     */
+    private void upgradeToVersion9(SQLiteDatabase database) {
+        database.execSQL("ALTER TABLE " + TABLE_MESSAGES +
+                " ADD COLUMN reasoning_content TEXT NOT NULL DEFAULT ''");
     }
 
     private void upgradeToVersion2(SQLiteDatabase database) {
@@ -303,6 +315,7 @@ public final class TavernDatabase extends SQLiteOpenHelper {
                         "version_count INTEGER NOT NULL DEFAULT 1," +
                         "active_version INTEGER NOT NULL DEFAULT 1," +
                         "chat_id TEXT NOT NULL DEFAULT 'default'," +
+                        "reasoning_content TEXT NOT NULL DEFAULT ''," +
                         "content TEXT NOT NULL," +
                         "created_at INTEGER NOT NULL)"
         );
