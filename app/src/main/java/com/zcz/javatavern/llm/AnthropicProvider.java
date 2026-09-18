@@ -145,6 +145,12 @@ public class AnthropicProvider implements ChatCompletionProvider {
                             if (text != null && !text.isEmpty()) {
                                 callback.onContent(text, false);
                             }
+                            // Extended thinking：deltaType "thinking_delta" 携带的是
+                            // Claude 的思考过程，而不是最终回复正文。
+                            String thinking = delta.optString("thinking", null);
+                            if (thinking != null && !thinking.isEmpty()) {
+                                callback.onContent(thinking, true);
+                            }
                         }
                     }
                 } catch (Exception e) {

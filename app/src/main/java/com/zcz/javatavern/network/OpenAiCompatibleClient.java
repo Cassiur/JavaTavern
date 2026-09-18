@@ -40,6 +40,9 @@ public final class OpenAiCompatibleClient implements AutoCloseable {
 
         void onDelta(String delta);
 
+        /** 推理内容增量（DeepSeek R1 的 reasoning_content、Claude 的 extended thinking）。 */
+        void onReasoningDelta(String delta);
+
         void onComplete();
 
         void onError(String message);
@@ -202,6 +205,10 @@ public final class OpenAiCompatibleClient implements AutoCloseable {
                     if (!delta.isEmpty()) {
                         listener.onDelta(delta);
                     }
+                    String reasoningDelta = event.getReasoningDelta();
+                    if (!reasoningDelta.isEmpty()) {
+                        listener.onReasoningDelta(reasoningDelta);
+                    }
                 }
             }
             if (!call.isCancelled()) {
@@ -257,10 +264,12 @@ public final class OpenAiCompatibleClient implements AutoCloseable {
                     new ChatCompletionProvider.StreamCallback() {
                         @Override
                         public void onContent(String delta, boolean isReasoning) {
-                            // isReasoning 内容（DeepSeek/Claude 思考过程）本轮先丢弃，留给
-                            // 推理内容存储+展示那一轮再接。
-                            if (!isReasoning && delta != null && !delta.isEmpty()
-                                    && !call.isCancelled()) {
+                            if (delta == null || delta.isEmpty() || call.isCancelled()) {
+                                return;
+                            }
+                            if (isReasoning) {
+                                listener.onReasoningDelta(delta);
+                            } else {
                                 listener.onDelta(delta);
                             }
                         }

@@ -135,6 +135,20 @@ public final class ChatRepository implements AutoCloseable {
                 groupId, role, content, createdAt, speakerId, speakerName);
     }
 
+    /** 同上，带推理内容（DeepSeek R1 / Claude extended thinking 的思考过程）。 */
+    public long addGroupMessage(
+            String groupId,
+            ChatMessage.Role role,
+            String content,
+            long createdAt,
+            String speakerId,
+            String speakerName,
+            String reasoningContent
+    ) {
+        return historyStore.addGroupMessage(
+                groupId, role, content, createdAt, speakerId, speakerName, reasoningContent);
+    }
+
     public List<ChatMessage> searchMessages(String characterId, String query, int limit) {
         return historyStore.searchMessages(characterId, query, limit);
     }
@@ -149,6 +163,17 @@ public final class ChatRepository implements AutoCloseable {
 
     public long addMessage(String characterId, ChatMessage.Role role, String content, long createdAt) {
         return historyStore.addMessage(characterId, role, content, createdAt);
+    }
+
+    /** 同上，带推理内容（DeepSeek R1 / Claude extended thinking 的思考过程）。 */
+    public long addMessage(
+            String characterId,
+            ChatMessage.Role role,
+            String content,
+            long createdAt,
+            String reasoningContent
+    ) {
+        return historyStore.addMessage(characterId, role, content, createdAt, reasoningContent);
     }
 
     public long addMessage(

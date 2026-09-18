@@ -26,7 +26,7 @@ public final class ChatHistoryStore {
             "action_token", "action_type", "action_state",
             "attachment_path", "attachment_mime_type",
             "reply_to_message_id", "reply_preview", "reaction", "speaker_name",
-            "version_count", "active_version"
+            "version_count", "active_version", "reasoning_content"
     };
     /** 与 {@link #MESSAGE_COLUMNS} 等价的带表别名版本，供 JOIN 查询复用。 */
     private static final String MESSAGE_COLUMNS_QUALIFIED =
@@ -34,7 +34,7 @@ public final class ChatHistoryStore {
                     "m.action_token, m.action_type, m.action_state, " +
                     "m.attachment_path, m.attachment_mime_type, " +
                     "m.reply_to_message_id, m.reply_preview, m.reaction, m.speaker_name, " +
-                    "m.version_count, m.active_version";
+                    "m.version_count, m.active_version, m.reasoning_content";
 
     private final TavernDatabase database;
 
@@ -175,6 +175,17 @@ public final class ChatHistoryStore {
     }
 
     public long addMessage(String characterId, ChatMessage.Role role, String content, long createdAt) {
+        return addMessage(characterId, role, content, createdAt, "");
+    }
+
+    /** 同上，带推理内容（新生成的 assistant 回复用；重 roll 不走这里）。 */
+    public long addMessage(
+            String characterId,
+            ChatMessage.Role role,
+            String content,
+            long createdAt,
+            String reasoningContent
+    ) {
         return addMessage(
                 characterId,
                 role,
@@ -184,7 +195,13 @@ public final class ChatHistoryStore {
                 createdAt,
                 "",
                 "",
-                ChatMessage.ActionState.NONE
+                ChatMessage.ActionState.NONE,
+                "",
+                "",
+                -1,
+                "",
+                "",
+                reasoningContent
         );
     }
 
@@ -282,6 +299,36 @@ public final class ChatHistoryStore {
             String replyPreview,
             String reaction
     ) {
+        return addMessage(
+                characterId, role, kind, title, content, createdAt,
+                actionToken, actionType, actionState,
+                attachmentPath, attachmentMimeType,
+                replyToMessageId, replyPreview, reaction, ""
+        );
+    }
+
+    /**
+     * 带推理内容（DeepSeek R1 / Claude extended thinking）的入口——只有新生成的
+     * assistant 回复会传非空 reasoningContent，重 roll（{@link #appendMessageVersion}）
+     * 不走这里，不单独为每个版本存一份思考过程。
+     */
+    public long addMessage(
+            String characterId,
+            ChatMessage.Role role,
+            ChatMessage.Kind kind,
+            String title,
+            String content,
+            long createdAt,
+            String actionToken,
+            String actionType,
+            ChatMessage.ActionState actionState,
+            String attachmentPath,
+            String attachmentMimeType,
+            long replyToMessageId,
+            String replyPreview,
+            String reaction,
+            String reasoningContent
+    ) {
         ContentValues values = new ContentValues();
         values.put("character_id", characterId);
         values.put("role", role.name());
@@ -297,6 +344,7 @@ public final class ChatHistoryStore {
         values.put("reaction", reaction);
         values.put("content", content);
         values.put("created_at", createdAt);
+        values.put("reasoning_content", reasoningContent == null ? "" : reasoningContent);
         return database.getWritableDatabase().insertOrThrow(TABLE_MESSAGES, null, values);
     }
 
@@ -309,6 +357,19 @@ public final class ChatHistoryStore {
             String speakerId,
             String speakerName
     ) {
+        return addGroupMessage(characterId, role, content, createdAt, speakerId, speakerName, "");
+    }
+
+    /** 同上，带推理内容——语义和 {@link #addMessage(String, ChatMessage.Role, ChatMessage.Kind, String, String, long, String, String, ChatMessage.ActionState, String, String, long, String, String, String)} 一致。 */
+    public long addGroupMessage(
+            String characterId,
+            ChatMessage.Role role,
+            String content,
+            long createdAt,
+            String speakerId,
+            String speakerName,
+            String reasoningContent
+    ) {
         ContentValues values = new ContentValues();
         values.put("character_id", characterId);
         values.put("role", role.name());
@@ -318,6 +379,7 @@ public final class ChatHistoryStore {
         values.put("created_at", createdAt);
         values.put("speaker_id", speakerId);
         values.put("speaker_name", speakerName);
+        values.put("reasoning_content", reasoningContent == null ? "" : reasoningContent);
         return database.getWritableDatabase().insertOrThrow(TABLE_MESSAGES, null, values);
     }
 
@@ -707,7 +769,8 @@ public final class ChatHistoryStore {
                 cursor.getString(13),
                 cursor.getString(14),
                 cursor.getInt(15),
-                cursor.getInt(16)
+                cursor.getInt(16),
+                cursor.getString(17)
         );
     }
 

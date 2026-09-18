@@ -52,4 +52,34 @@ public final class SseEventParserTest {
         assertFalse(event.isDone());
         assertEquals("", event.getDelta());
     }
+
+    @Test
+    public void parsesDeepSeekReasoningContentDelta() {
+        SseEventParser.Event event = SseEventParser.parse(
+                "data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"让我想想\"}}]}"
+        );
+
+        assertFalse(event.isDone());
+        assertEquals("", event.getDelta());
+        assertEquals("让我想想", event.getReasoningDelta());
+    }
+
+    @Test
+    public void parsesContentAndReasoningInSameDelta() {
+        SseEventParser.Event event = SseEventParser.parse(
+                "data: {\"choices\":[{\"delta\":{\"content\":\"答案\",\"reasoning_content\":\"思考\"}}]}"
+        );
+
+        assertEquals("答案", event.getDelta());
+        assertEquals("思考", event.getReasoningDelta());
+    }
+
+    @Test
+    public void plainDeltaWithoutReasoning_returnsEmptyReasoningDelta() {
+        SseEventParser.Event event = SseEventParser.parse(
+                "data: {\"choices\":[{\"delta\":{\"content\":\"你\"}}]}"
+        );
+
+        assertEquals("", event.getReasoningDelta());
+    }
 }

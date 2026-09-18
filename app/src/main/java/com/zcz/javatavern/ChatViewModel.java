@@ -84,6 +84,15 @@ public final class ChatViewModel extends AndroidViewModel {
      */
     private volatile long activeRegenerateMessageId = -1L;
 
+    /**
+     * 当前请求累积的推理内容（DeepSeek R1 / Claude extended thinking）。独立于
+     * {@link StreamSession}/{@link StreamAccumulator} 之外的一条并行侧信道——
+     * 那两个类是这个项目里状态机不变量最严格的部分（RT-1~RT-5 全套测试覆盖
+     * 的"只终态一次/只持久化一次"），不值得为了推理内容再改一遍；这里只在
+     * onTerminalText 持久化时读一次快照，不影响主文本的状态转换。
+     */
+    private final StringBuilder reasoningBuffer = new StringBuilder();
+
     private final MutableLiveData<StreamSnapshot> streamState = new MutableLiveData<>(null);
 
     /**
@@ -213,6 +222,9 @@ public final class ChatViewModel extends AndroidViewModel {
         final String charId = sessionCharacterId;
         activeGroupSpeaker = groupSpeaker;
         activeRegenerateMessageId = regenerateMessageId;
+        synchronized (reasoningBuffer) {
+            reasoningBuffer.setLength(0);
+        }
 
         final String emptyFallback = getString(R.string.stream_empty_fallback);
         final String stoppedMarker = getString(R.string.stream_stopped_marker);
@@ -243,6 +255,14 @@ public final class ChatViewModel extends AndroidViewModel {
                         if (currentSession.get() != session) return;
                         session.appendDelta(delta);
                         scheduleFlush(session);
+                    }
+
+                    @Override
+                    public void onReasoningDelta(String delta) {
+                        if (currentSession.get() != session) return;
+                        synchronized (reasoningBuffer) {
+                            reasoningBuffer.append(delta);
+                        }
                     }
 
                     @Override
@@ -310,19 +330,24 @@ public final class ChatViewModel extends AndroidViewModel {
                 final String cid = session.getCharacterId();
                 final CharacterProfile speaker = activeGroupSpeaker;
                 final long targetId = activeRegenerateMessageId;
+                final String reasoningText;
+                synchronized (reasoningBuffer) {
+                    reasoningText = reasoningBuffer.toString();
+                }
                 AppExecutors.get().diskIo().execute(() -> {
                     long rowId;
                     if (speaker != null) {
                         rowId = ownedRepository.addGroupMessage(
                                 cid, ChatMessage.Role.ASSISTANT, text, createdAt,
-                                speaker.getId(), speaker.getName());
+                                speaker.getId(), speaker.getName(), reasoningText);
                     } else if (targetId > 0) {
                         // 重 roll：内容作为新版本写回原消息，位置不变、旧版本保留。
+                        // 思考过程不随版本单独存一份，只保留首次生成时的那份。
                         ownedRepository.appendMessageVersion(targetId, text, createdAt);
                         rowId = targetId;
                     } else {
                         rowId = ownedRepository.addMessage(
-                                cid, ChatMessage.Role.ASSISTANT, text, createdAt);
+                                cid, ChatMessage.Role.ASSISTANT, text, createdAt, reasoningText);
                     }
                     mainHandler.post(() -> {
                         StreamSnapshot cur = streamState.getValue();
