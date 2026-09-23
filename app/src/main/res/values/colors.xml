@@ -1,15 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  Light palette mirrors OmniTavern's built-in "经典白" (classic-light) preset:
+  neutral cool-gray page, white surfaces, slate text, bright iOS-style blue.
+-->
 <resources>
-    <color name="primary">#65558F</color>
-    <color name="primary_dark">#4F3F75</color>
-    <color name="primary_soft">#DFD4ED</color>
+    <color name="primary">#199AFF</color>
+    <color name="primary_dark">#0B66C2</color>
+    <color name="primary_soft">#24199AFF</color>
     <color name="on_primary">#FFFFFF</color>
-    <color name="background">#F7F4FA</color>
+    <color name="background">#F4F5F6</color>
     <color name="surface">#FFFFFF</color>
-    <color name="input_background">#EEEAF2</color>
-    <color name="border">#E1DAE7</color>
-    <color name="text_primary">#242126</color>
-    <color name="text_secondary">#6F6873</color>
-    <color name="warning">#8B4A35</color>
-    <color name="success">#2F6B4F</color>
+    <color name="input_background">#FFFFFF</color>
+    <color name="border">#5294A3B8</color>
+    <color name="divider">#0D000000</color>
+    <color name="text_primary">#0F172A</color>
+    <color name="text_secondary">#64748B</color>
+    <color name="warning">#D97706</color>
+    <color name="success">#16A34A</color>
 </resources>

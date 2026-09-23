@@ -3,29 +3,30 @@
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    android:layout_marginBottom="12dp"
     android:background="@drawable/bg_character_card"
     android:clickable="true"
-    android:elevation="3dp"
     android:focusable="true"
     android:foreground="?attr/selectableItemBackground"
     android:gravity="center_vertical"
-    android:minHeight="96dp"
+    android:minHeight="72dp"
     android:orientation="horizontal"
-    android:padding="16dp">
+    android:paddingStart="10dp"
+    android:paddingTop="12dp"
+    android:paddingEnd="4dp"
+    android:paddingBottom="12dp">
 
     <FrameLayout
-        android:layout_width="56dp"
-        android:layout_height="56dp">
+        android:layout_width="48dp"
+        android:layout_height="48dp">
 
         <TextView
             android:id="@+id/characterAvatar"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
+            android:fontFamily="sans-serif-medium"
             android:gravity="center"
             android:textColor="@android:color/white"
-            android:textSize="21sp"
-            android:textStyle="bold" />
+            android:textSize="18sp" />
 
         <com.google.android.material.imageview.ShapeableImageView
             android:id="@+id/characterPortrait"
@@ -34,15 +35,13 @@
             android:contentDescription="@string/character_portrait_desc"
             android:scaleType="centerCrop"
             android:visibility="gone"
-            app:shapeAppearanceOverlay="@style/ShapeAppearanceCircular"
-            app:strokeColor="@color/primary_soft"
-            app:strokeWidth="2dp" />
+            app:shapeAppearanceOverlay="@style/ShapeAppearanceAvatar" />
     </FrameLayout>
 
     <LinearLayout
         android:layout_width="0dp"
         android:layout_height="wrap_content"
-        android:layout_marginStart="14dp"
+        android:layout_marginStart="12dp"
         android:layout_weight="1"
         android:orientation="vertical">
 
@@ -58,10 +57,10 @@
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
                 android:ellipsize="end"
+                android:fontFamily="sans-serif-medium"
                 android:maxLines="1"
                 android:textColor="@color/text_primary"
-                android:textSize="17sp"
-                android:textStyle="bold" />
+                android:textSize="16sp" />
 
             <TextView
                 android:id="@+id/characterTag"
@@ -85,7 +84,7 @@
             android:id="@+id/characterPreview"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="4dp"
+            android:layout_marginTop="3dp"
             android:ellipsize="end"
             android:maxLines="1"
             android:textColor="@color/text_secondary"
@@ -98,7 +97,7 @@
         style="@style/Widget.MaterialComponents.Button.TextButton"
         android:layout_width="wrap_content"
         android:layout_height="40dp"
-        android:layout_marginStart="8dp"
+        android:layout_marginStart="4dp"
         android:minWidth="0dp"
         android:text="@string/edit_character"
         android:textSize="13sp" />

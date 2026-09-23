@@ -2,6 +2,18 @@
 
 All notable changes are documented here. The project follows Semantic Versioning after `1.0.0`.
 
+## Unreleased
+
+### Changed
+
+- New visual style modeled on OmniTavern's classic light/dark themes: neutral cool-gray backgrounds, slate text, a `#199AFF` accent, and a GitHub-dark-style night palette in place of the Material default purple.
+- Home lists characters as flat rows with hairline dividers and 48dp rounded-square avatars instead of floating cards; initial-letter avatars use a saturated palette.
+- Chat bubbles use a light shadow instead of an outline, the back button is a vector chevron, and the search and message inputs are bordered pills.
+
+### Fixed
+
+- The create-character button no longer renders in Material's default teal; the theme now sets `colorSecondary` to the app accent.
+
 ## 0.4.1 - 2026-09-12
 
 ### Added
