@@ -110,7 +110,7 @@ public final class CharacterCardParser {
 
     /**
      * SillyTavern position 取值：数字 0=before_char / 1=after_char，V3 亦可用
-     * 字符串 "before_char"/"after_char"。其余（@D 深度注入等）本轮归入 after_char。
+     * 字符串 "before_char"/"after_char"。其余（@D 深度注入等）统一归入 after_char。
      */
     private int resolvePosition(Object raw) {
         if (raw instanceof String stringPosition) {

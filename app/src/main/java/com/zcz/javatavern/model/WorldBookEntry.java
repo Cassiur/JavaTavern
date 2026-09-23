@@ -8,11 +8,11 @@ import java.util.List;
  * <p>高级字段语义（对齐 SillyTavern + AiChat）：
  * <ul>
  *   <li>{@code position}：注入位置。{@link #POSITION_BEFORE_CHAR}(0)=角色卡定义前，
- *       {@link #POSITION_AFTER_CHAR}(1)=角色卡定义后。其余取值（@D 深度注入等）本轮
+ *       {@link #POSITION_AFTER_CHAR}(1)=角色卡定义后。其余取值（@D 深度注入等）
  *       仅存储保留，组装时按 after_char 处理。</li>
  *   <li>{@code order}：即 ST 的 {@code insertion_order}，同位置内升序，默认 100。</li>
  *   <li>{@code priority}：作者推荐优先级，0–99，同 order 时大者靠前，默认 0。</li>
- *   <li>{@code depth}：注入深度（position=@D 时用），默认 4，本轮仅存储保留。</li>
+ *   <li>{@code depth}：注入深度（position=@D 时用），默认 4，仅存储保留，不参与组装。</li>
  *   <li>{@code scanDepth}：向前扫描消息数量，默认 100。</li>
  *   <li>{@code probability}：触发概率百分比，100=总是触发，0=永不触发，默认 100。</li>
  *   <li>{@code secondaryKeys}：次要关键词列表，命中任一即激活。</li>
